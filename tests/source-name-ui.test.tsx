@@ -28,6 +28,7 @@ it("one Escape cancels inline source/folder editing without closing the overlay 
 		await act(async () => { root.render(<html><head /><body><ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>
 			<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => { closed++; }} />
 		</ServerEventsProvider></body></html>); });
+		await act(async () => { (document.querySelector('[data-testid="chain-grouping-sources"]') as HTMLElement).click(); });
 		await act(async () => { (document.querySelector('[data-testid="chain-show-empty"]') as HTMLInputElement).click(); });
 		for (const raw of ["null", "3", '"text"', "{"]) {
 			const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });

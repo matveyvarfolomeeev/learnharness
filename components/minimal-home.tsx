@@ -184,6 +184,7 @@ export function MinimalHome({
 			    paint after everything it covers. */}
 			<ChainTableOverlay
 				open={chainsOpen}
+				projectId={projectId}
 				nodes={snapshot?.propositions ?? []}
 				chains={snapshot?.chains ?? []}
 				sessions={snapshot?.sessions ?? {}}

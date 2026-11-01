@@ -1,6 +1,6 @@
 import { stores } from "./stores.ts";
 import { getGraph } from "../core/graph.ts";
-import { inProjects, projectIds, UNASSIGNED_PROJECT, validateProject } from "../core/projects.ts";
+import { inProjects, projectIds, projectOf, UNASSIGNED_PROJECT, validateProject } from "../core/projects.ts";
 import { emit } from "../core/events.ts";
 import { extractionStatuses } from "../agent/subagents/extraction.ts";
 
@@ -36,7 +36,43 @@ export function assignProject(sourceId: string, projectId: string) {
 
 export function updateProjects(body: Record<string, unknown>): { status: number; error?: string; id?: string } {
 	const catalog = stores.projectStore.read();
-	if (body.action === "auto") {
+	if (body.action === "delete") {
+		if (typeof body.id !== "string" || typeof body.targetId !== "string" || !body.targetId) return { status: 400, error: "Выбери проект для переноса знаний" };
+		if (body.id === UNASSIGNED_PROJECT) return { status: 400, error: "Раздел «Без проекта» нельзя удалить" };
+		if (!catalog.projects.some((p) => p.id === body.id)) return { status: 404, error: "Проект уже удалён или не найден" };
+		if (projectIds(catalog, body.id).has(body.targetId)) return { status: 400, error: "Нельзя перенести проект в себя или свой подраздел" };
+		if (body.targetId !== UNASSIGNED_PROJECT && !catalog.projects.some((p) => p.id === body.targetId)) return { status: 400, error: "Проект для переноса не найден" };
+		if (extractionStatuses().length) return { status: 409, error: "Дождись завершения экстракции, затем удали проект" };
+		const targetId = body.targetId;
+		const next = structuredClone(catalog);
+		if (targetId === UNASSIGNED_PROJECT && !next.projects.some((p) => p.id === targetId)) next.projects.push({ id: targetId, name: "Без проекта", createdAt: new Date().toISOString() });
+		next.projects = next.projects.filter((p) => p.id !== body.id).map((p) => {
+			if (p.parentId !== body.id) return p;
+			const child = { ...p }; delete child.parentId;
+			return targetId === UNASSIGNED_PROJECT ? child : { ...child, parentId: targetId };
+		});
+		for (const child of next.projects.filter((p) => catalog.projects.find((prior) => prior.id === p.id)?.parentId === body.id)) {
+			const error = validateProject(next, child);
+			if (error) return { status: 400, error: `Не удалось перенести подраздел «${child.name}»: ${error}` };
+		}
+		for (const [sourceId, projectId] of Object.entries(next.assignments)) if (projectId === body.id) next.assignments[sourceId] = targetId;
+		const lines = stores.graphStore.readNodes();
+		const moving = new Set(getGraph(stores.graphStore).nodes.filter((node) => projectOf(node, catalog) === body.id).map((node) => node.id));
+		const movedLines = lines.map((node) => moving.has(node.id) || node.subjectId === body.id ? { ...node, subjectId: targetId } : node);
+		const changed = movedLines.some((node, index) => node !== lines[index]);
+		// Only subjectId changes. Keep every ledger line, ID and provenance point;
+		// chains, mastery, coverage, source records and transcripts stay untouched.
+		if (changed) stores.graphStore.rewriteLedgers({ nodes: movedLines });
+		try { stores.projectStore.write(next); }
+		catch (error) {
+			// A failed catalog save must not leave a half-completed move.
+			if (changed) stores.graphStore.rewriteLedgers({ nodes: lines });
+			throw error;
+		}
+		emit("activity-changed", {});
+		emit("chats-changed", {});
+		return { status: 200, id: targetId };
+	} else if (body.action === "auto") {
 		if (typeof body.enabled !== "boolean") return { status: 400, error: "Нужен переключатель true/false" };
 		catalog.autoDetect = body.enabled;
 		stores.projectStore.write(catalog);

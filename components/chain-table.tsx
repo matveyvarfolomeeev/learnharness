@@ -12,9 +12,9 @@ import { MasteryControl } from "./mastery";
  * rule at once). The overlay (z-40) covers home's floating header while
  * open, so the TopBar's own SidebarToggle is the reopen path.
  *
- * HIERARCHY (three levels, one click each): CLUSTER (the birth session —
- * a chat or a notes file; a chain lives where its CONCLUSION was born,
- * owner ruling) → REASONING CHAIN → PROPOSITION STATEMENTS. Expanding a
+ * HIERARCHY: project / subproject (the default), or the separate source
+ * view (a chat or notes file, grouped by the conclusion's provenance)
+ * → REASONING CHAIN → PROPOSITION STATEMENTS. Expanding a
  * chain reveals its members' statement text directly — names live in the
  * chain line, never twice; a singleton reveals its one statement in one
  * click. Everything starts collapsed. PROMINENT indentation carries the
@@ -56,7 +56,7 @@ import { MasteryControl } from "./mastery";
  * Read-only toward the graph.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
@@ -65,19 +65,23 @@ import {
 	BookIcon,
 	BookOpenIcon,
 	FolderPlusIcon,
+	FolderIcon,
+	FolderOpenIcon,
 	Trash2Icon,
 	ListTreeIcon,
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
-import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
+import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel, projectIds, projectOf, projectPath, UNASSIGNED_PROJECT } from "@/src/core";
+import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection, ProjectCatalog } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
+import { useProjects } from "./projects";
+import { sessionFindHasForegroundLayer } from "./session-find";
 
 /** The sortable columns (owner ruling: all three — consistency). */
 export type ChainSortCol = "name" | "props" | "created";
@@ -86,17 +90,42 @@ export interface ChainSort {
 	/** 1 = ascending (A→Z, oldest-first, smallest-first), -1 = descending. */
 	dir: 1 | -1;
 }
+export type ChainGrouping = "projects" | "sources";
 
-/** A cluster's chains share the conclusion's birth (owner ruling). This
- *  record is assembled per render from the visible chains. */
+/** A displayed project or source and its visible chains. Parent projects
+ * include descendants in nodeIds, without duplicating the chain rows. */
 interface ClusterGroup {
 	key: string;
 	birth: string | null;
 	label: string | null;
-	kind: "chat" | "notes" | null;
+	kind: "chat" | "notes" | "project" | null;
+	parentId?: string;
 	chains: ReturnType<typeof chainsForSelection>;
 	nodeIds: string[];
 	newestCreatedAt: string;
+}
+
+function addChain(group: ClusterGroup, chain: ClusterGroup["chains"][number], nodes: ReadonlyMap<string, GraphNode>) {
+	group.chains.push(chain);
+	for (const id of [...chain.premises, chain.conclusion]) {
+		if (!group.nodeIds.includes(id)) group.nodeIds.push(id);
+		const date = nodes.get(id)?.createdAt ?? "";
+		if (date > group.newestCreatedAt) group.newestCreatedAt = date;
+	}
+}
+
+/** Reuse the chain renderer in both hierarchies; project rows never acquire
+ * source-management actions merely because their IDs happen to match. */
+function ChainGroupTree(props: Parameters<typeof SourceFolderTree<ClusterGroup>>[0] & { grouping: ChainGrouping }) {
+	if (props.grouping === "sources") return <SourceFolderTree {...props} />;
+	const keys = new Set(props.groups.map((group) => group.key));
+	const renderLevel = (parentId: string | undefined, depth: number): ReactNode => props.groups
+		.filter((group) => (group.parentId && keys.has(group.parentId) ? group.parentId : undefined) === parentId)
+		.map((group) => {
+			const open = props.query.trim() ? !props.collapsedForSearch?.has(group.key) : props.expanded.has(group.key);
+			return <Fragment key={group.key}>{props.renderSource(group, depth)}{open && renderLevel(group.key, depth + 1)}</Fragment>;
+		});
+	return <>{renderLevel(undefined, 0)}</>;
 }
 
 /** The table's pure body — exported for SSR pins (the render-suite
@@ -131,7 +160,15 @@ export function ChainTableBody({
 	keyboardActive = true,
 	showEmptySources = false,
 	onShowEmptySourcesChange,
+	grouping = "sources",
+	onGroupingChange,
+	projects,
+	projectId,
 }: {
+	grouping?: ChainGrouping;
+	onGroupingChange?: (grouping: ChainGrouping) => void;
+	projects?: ProjectCatalog;
+	projectId?: string;
 	keyboardActive?: boolean;
 	showEmptySources?: boolean;
 	onShowEmptySourcesChange?: (show: boolean) => void;
@@ -173,15 +210,15 @@ export function ChainTableBody({
 	const navigation = useChainNavigation(tableRef, searchRef, keyboardActive);
 	// Searches still expand sources/folders by default, but explicit keyboard
 	// or pointer collapses remain effective until the search changes.
-	const [searchFolds, setSearchFolds] = useState({ query, ids: new Set<string>() });
-	useEffect(() => { setSearchFolds({ query, ids: new Set() }); }, [query]);
-	const foldedClusters = searchFolds.query === query ? searchFolds.ids : new Set<string>();
+	const [searchFolds, setSearchFolds] = useState({ query, grouping, ids: new Set<string>() });
+	useEffect(() => { setSearchFolds({ query, grouping, ids: new Set() }); }, [query, grouping]);
+	const foldedClusters = searchFolds.query === query && searchFolds.grouping === grouping ? searchFolds.ids : new Set<string>();
 	const toggleCluster = (id: string) => {
 		if (!query.trim()) { onToggleCluster(id); return; }
 		setSearchFolds((previous) => {
-			const ids = new Set(previous.query === query ? previous.ids : []);
+			const ids = new Set(previous.query === query && previous.grouping === grouping ? previous.ids : []);
 			if (ids.has(id)) ids.delete(id); else ids.add(id);
-			return { query, ids };
+			return { query, grouping, ids };
 		});
 	};
 	const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -191,6 +228,22 @@ export function ChainTableBody({
 	[directory, sourceRecords, sessions, fileSources, query]);
 	const chains = useMemo(() => chainsForSelection(nodes, storedChains), [nodes, storedChains]);
 	const searching = query.trim() !== "";
+	const projectScope = useMemo(() => projects && projectId ? projectIds(projects, projectId) : undefined, [projects, projectId]);
+	const nodeProjects = useMemo(() => {
+		const result = new Map<string, string[]>();
+		if (!projects) return result;
+		const known = new Set(projects.projects.map((p) => p.id));
+		for (const node of nodes) {
+			const membership = [...new Set([projectOf(node, projects), ...node.provenance.map((pt) => projects.assignments[pt.chatId])]
+				.filter((id): id is string => typeof id === "string" && (id === UNASSIGNED_PROJECT || known.has(id))))];
+			const ids = (membership.length ? membership : [UNASSIGNED_PROJECT]).filter((id) => !projectScope || projectScope.has(id));
+			// A shared idea may belong to several subjects. Within one branch,
+			// show it at the deepest matching level, and roll its count up.
+			result.set(node.id, ids.filter((id) => !ids.some((other) => other !== id && projectPath(projects, other).some((p) => p.id === id))));
+		}
+		return result;
+	}, [nodes, projects, projectScope]);
+	const matchesProject = useCallback((id: string) => fuzzyScore(query, id === UNASSIGNED_PROJECT ? "Без проекта" : projectPath(projects!, id).map((p) => p.name).join(" / ")) !== null, [projects, query]);
 	const allSourceNodes = useMemo(() => {
 		const membership = new Map<string, Set<string>>();
 		for (const chain of chains) {
@@ -210,7 +263,7 @@ export function ChainTableBody({
 		const scored = chains
 			.map((chain) => {
 				const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
-				let best: number | null = birth && matchesSource(birth) ? 0 : null;
+				let best: number | null = (grouping === "projects" ? nodeProjects.get(chain.conclusion)?.some(matchesProject) : birth && matchesSource(birth)) ? 0 : null;
 				for (const id of [...chain.premises, chain.conclusion]) {
 					const node = byId.get(id);
 					if (!node) continue;
@@ -224,40 +277,78 @@ export function ChainTableBody({
 		return scored
 			.sort((a, b) => b.best - a.best || (a.chain.id < b.chain.id ? -1 : 1))
 			.map(({ chain }) => chain);
-	}, [chains, byId, query, searching, matchesSource]);
+	}, [chains, byId, query, searching, matchesSource, grouping, nodeProjects, matchesProject]);
 
-	// Group the visible chains by their CONCLUSION's birth (owner ruling).
-	// Unlabeled births (provenance gone / never named) form one honest
-	// muted group, sorted last under name-sort.
+	// Projects follow subject membership; sources follow original provenance.
+	// Switching the view never rewrites either relationship.
 	const groups = useMemo(() => {
 		const map = new Map<string, ClusterGroup>();
-		for (const source of directory?.sources ?? []) {
-			if (searching && !matchesSource(source.id)) continue;
-			map.set(source.id, { key: source.id, birth: source.id, label: source.label,
-				kind: source.kind === "missing" ? null : source.kind, chains: [], nodeIds: [], newestCreatedAt: "" });
-		}
-		for (const chain of visibleChains) {
-			const conclusion = byId.get(chain.conclusion);
-			// Source folders use provenance IDs; a project is not a deletable source.
-			const birth = (directory ? undefined : conclusion?.subjectId) ?? conclusion?.provenance[0]?.chatId ?? null;
-			const key = birth ?? "\0unlabeled";
-			let group = map.get(key);
-			if (!group) {
-				const label = birth === null ? null : (sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])));
-				const kind =
-					birth === null ? null : sessions[birth] !== undefined ? "chat" : fileSources[birth] !== undefined ? "notes" : null;
-				group = { key, birth, label, kind, chains: [], nodeIds: [], newestCreatedAt: "" };
-				map.set(key, group);
+		if (grouping === "projects") {
+			if (!projects) return [];
+			for (const project of projects.projects) {
+				if (projectScope && !projectScope.has(project.id)) continue;
+				map.set(project.id, { key: project.id, birth: null, kind: "project", label: project.name,
+					parentId: project.parentId, chains: [], nodeIds: [], newestCreatedAt: "" });
 			}
-			group.chains.push(chain);
-			for (const id of [...chain.premises, chain.conclusion]) {
-				if (!group.nodeIds.includes(id)) group.nodeIds.push(id);
-				const createdAt = byId.get(id)?.createdAt ?? "";
-				if (createdAt > group.newestCreatedAt) group.newestCreatedAt = createdAt;
+			for (const chain of visibleChains) for (const id of nodeProjects.get(chain.conclusion) ?? []) {
+				let group = map.get(id);
+				if (!group) {
+					group = { key: id, birth: null, kind: "project", label: "Без проекта", chains: [], nodeIds: [], newestCreatedAt: "" };
+					map.set(id, group);
+				}
+				addChain(group, chain, byId);
+			}
+			const covered = new Map([...map].map(([id, group]) => [id, new Set(group.nodeIds)]));
+			for (const group of map.values()) { group.nodeIds = []; group.newestCreatedAt = ""; }
+			// A premise used in another project's chain still belongs in its own
+			// project. Keep complete arguments, but count/select only this subject's
+			// members and add standalone rows for members not yet shown here.
+			for (const node of byId.values()) for (const id of nodeProjects.get(node.id) ?? []) {
+				if (searching && !covered.get(id)?.has(node.id) && !matchesProject(id) && fuzzyScore(query, node.name, node.statement, ...node.aliases) === null) continue;
+				let group = map.get(id);
+				if (!group) {
+					group = { key: id, birth: null, kind: "project", label: "Без проекта", chains: [], nodeIds: [], newestCreatedAt: "" };
+					map.set(id, group);
+				}
+				group.nodeIds.push(node.id);
+				if (node.createdAt > group.newestCreatedAt) group.newestCreatedAt = node.createdAt;
+				if (!covered.get(id)?.has(node.id)) group.chains.push({ id: node.id, premises: [], conclusion: node.id });
+			}
+			for (const group of map.values()) for (const parent of projectPath(projects, group.key).slice(0, -1)) {
+				const target = map.get(parent.id);
+				if (!target) continue;
+				target.nodeIds = [...new Set([...target.nodeIds, ...group.nodeIds])];
+				if (group.newestCreatedAt > target.newestCreatedAt) target.newestCreatedAt = group.newestCreatedAt;
+			}
+			const visible = new Set([...map.values()].filter((group) => !searching || group.nodeIds.length || matchesProject(group.key)).flatMap((group) => [group.key, ...projectPath(projects, group.key).map((p) => p.id)]));
+			for (const group of map.values()) {
+				if (!visible.has(group.key)) map.delete(group.key);
+				else if (!group.newestCreatedAt) group.newestCreatedAt = projects.projects.find((p) => p.id === group.key)?.createdAt ?? "";
+			}
+		} else {
+			for (const source of directory?.sources ?? []) {
+				if (searching && !matchesSource(source.id)) continue;
+				map.set(source.id, { key: source.id, birth: source.id, label: source.label,
+					kind: source.kind === "missing" ? null : source.kind, chains: [], nodeIds: [], newestCreatedAt: "" });
+			}
+			for (const chain of visibleChains) {
+				const conclusion = byId.get(chain.conclusion);
+				// Source folders use provenance IDs; a project is not a deletable source.
+				const birth = conclusion?.provenance[0]?.chatId ?? null;
+				const key = birth ?? "\0unlabeled";
+				let group = map.get(key);
+				if (!group) {
+					const label = birth === null ? null : (sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])));
+					const kind =
+						birth === null ? null : sessions[birth] !== undefined ? "chat" : fileSources[birth] !== undefined ? "notes" : null;
+					group = { key, birth, label, kind, chains: [], nodeIds: [], newestCreatedAt: "" };
+					map.set(key, group);
+				}
+				addChain(group, chain, byId);
 			}
 		}
 		const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-		const list = [...map.values()].filter((group) => showEmptySources || group.nodeIds.length > 0);
+		const list = [...map.values()].filter((group) => grouping === "projects" || showEmptySources || group.nodeIds.length > 0);
 		// Existing graph groups retain their newest-member date. Inventory-only
 		// rows fall back to record dates; a re-import must not redraft old dates.
 		for (const group of list) if (!group.newestCreatedAt && group.birth) group.newestCreatedAt = sourceRecords.get(group.birth)?.createdAt ?? "";
@@ -288,7 +379,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, showEmptySources]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, showEmptySources, grouping, projects, projectScope, nodeProjects, matchesProject]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -315,13 +406,6 @@ export function ChainTableBody({
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
-				{onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
-					onClick={() => setCreatingFolder(true)} className="lh-no-drag rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
-				{directory && <label className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
-					<input type="checkbox" data-testid="chain-show-empty" checked={showEmptySources}
-						onChange={(event) => onShowEmptySourcesChange?.(event.target.checked)} className="size-3.5 accent-foreground" />
-					Показать пустые
-				</label>}
 				<div className="relative min-w-0 max-w-56 flex-1">
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 					<input
@@ -345,6 +429,18 @@ export function ChainTableBody({
 					<XIcon className="size-4" />
 				</button>
 			</TopBar>
+			<div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-3 py-2">
+				<div role="group" aria-label="Группировка знаний" className="flex shrink-0 rounded-lg border border-border p-0.5">
+					{([ ["projects", "По проектам"], ["sources", "По источникам"] ] as const).map(([value, label]) => <button key={value} type="button" data-testid={`chain-grouping-${value}`}
+						aria-pressed={grouping === value} onClick={() => onGroupingChange?.(value)} className={`rounded-md px-3 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-ring ${grouping === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50"}`}>{label}</button>)}
+				</div>
+				{grouping === "sources" && directory && <label className="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
+					<input type="checkbox" data-testid="chain-show-empty" checked={showEmptySources}
+						onChange={(event) => onShowEmptySourcesChange?.(event.target.checked)} className="size-3.5 accent-foreground" />Показать пустые
+				</label>}
+				{grouping === "sources" && onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
+					onClick={() => setCreatingFolder(true)} className="rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
+			</div>
 
 			{/* The list: NO per-row lines (owner ruling) — the ONLY horizontal
 			    separators sit between cluster groups; the ALIGNMENT STAIRCASE
@@ -385,20 +481,20 @@ export function ChainTableBody({
 					</button>
 				</div>
 
-				{creatingFolder && onOrganizationChange && <div className="flex items-center px-3 py-2" data-testid="new-folder-row">
+				{grouping === "sources" && creatingFolder && onOrganizationChange && <div className="flex items-center px-3 py-2" data-testid="new-folder-row">
 					<EditableSourceName name="" initiallyEditing onCancel={() => setCreatingFolder(false)}
 						onSave={async (name) => {
 						const id = await onOrganizationChange({ action: "create-folder", name, parentId: null });
 						onQuery(""); if (id) navigation.focusRow(["folder", id]); setCreatingFolder(false);
 					}} />
 				</div>}
-				{groups.length === 0 && (directory?.organization.folders.length ?? 0) === 0 && (
+				{groups.length === 0 && (grouping === "projects" || (directory?.organization.folders.length ?? 0) === 0) && (
 					<div data-testid="chain-table-nomatch" className="px-4 pt-3 text-xs text-muted-foreground">
-						No matching chains.
+						{grouping === "projects" && !projects ? "Загрузка проектов…" : "No matching chains."}
 					</div>
 				)}
 
-				<SourceFolderTree groups={groups} directory={directory} query={query} sort={sort} onAction={onOrganizationChange}
+				<ChainGroupTree grouping={grouping} groups={groups} directory={directory} query={query} sort={sort} onAction={onOrganizationChange}
 					sourceSelection={selectMode ? undefined : { sources: selectedSources, folders: selectedFolders }}
 					expanded={expandedClusters} collapsedForSearch={foldedClusters} onToggleExpanded={toggleCluster} selection={selection} selectedFolders={selectedFolders}
 					onToggleNodes={onToggleNodes} onToggleFolder={onToggleFolder} allowEmptySelection={!selectMode} allSourceNodes={allSourceNodes}
@@ -429,19 +525,19 @@ export function ChainTableBody({
 								/>
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
-								<RowCheckbox
+							<SourceDragRow {...chainRow([group.kind === "project" ? "project" : "source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={group.kind !== "project" && Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
+								{group.kind !== "project" || selectMode ? <RowCheckbox
 									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
 									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
 									indeterminate={selectMode ? selectedCount > 0 && selectedCount < group.nodeIds.length : false}
 									onToggle={(next) => { if (selectMode) onToggleNodes(group.nodeIds, next); else if (group.birth) onToggleSource(group.birth, next); }}
 									testid={`cluster-checkbox-${group.key}`}
-									label={selectMode ? `Select everything born in ${group.label ?? "unlabeled"}` : `Select source ${group.label ?? "unlabeled"}`}
-								/>
+									label={selectMode ? `Select knowledge in ${group.label ?? "unlabeled"}` : `Select source ${group.label ?? "unlabeled"}`}
+								/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
 								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
-								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
+								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand ${group.kind === "project" ? "project" : "source"} ${group.label ?? "unlabeled"}`}
 									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
+									{group.kind === "project" ? open ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" /> : open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
 									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
@@ -579,7 +675,7 @@ export function ChainTableBody({
 			{/* The floating selection bar (owner ruling: never shifts layout —
 			    the Google-Photos pattern). Appears only when something is
 			    selected; floats over the table's bottom edge. */}
-			{(selectMode ? selection.size > 0 : selectedSources.size > 0 || fullySelectedFolders.size > 0) && (
+			{(selectMode ? selection.size > 0 : grouping === "sources" && (selectedSources.size > 0 || fullySelectedFolders.size > 0)) && (
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-4">
 					<div
 						data-testid="chain-selection-bar"
@@ -705,7 +801,9 @@ export function ChainTableOverlay({
 	selectMode,
 	controlledSelection,
 	onSelectionChange,
+	projectId,
 }: {
+	projectId?: string;
 	open: boolean;
 	nodes: GraphNode[];
 	chains: GraphChain[];
@@ -717,10 +815,13 @@ export function ChainTableOverlay({
 	onSelectionChange?: (next: ReadonlySet<string>) => void;
 }) {
 	const [query, setQuery] = useState("");
+	const [grouping, setGrouping] = useState<ChainGrouping>("projects");
+	const { data: projects, error: projectsError } = useProjects();
 	const [showEmptySources, setShowEmptySources] = useState(false);
 	const [sort, setSort] = useState<ChainSort>({ col: "name", dir: 1 });
 	const [internalSelection, setInternalSelection] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedClusters, setExpandedClusters] = useState<ReadonlySet<string>>(() => new Set());
+	const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedChains, setExpandedChains] = useState<ReadonlySet<string>>(() => new Set());
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
 	const deleteOpen = deletion !== null;
@@ -747,12 +848,12 @@ export function ChainTableOverlay({
 		} catch (error) { if (version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
 	}, []);
 	useEffect(() => {
-		if (open) void readDirectory();
+		if (open && grouping === "sources") void readDirectory();
 		return () => { requestVersion.current++; };
-	}, [open, readDirectory]);
-	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
-	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
-	useServerResync(() => { if (open) void readDirectory(); });
+	}, [open, grouping, readDirectory]);
+	useServerEvent("sources-changed", () => { if (open && grouping === "sources") void readDirectory(); });
+	useServerEvent("chats-changed", () => { if (open && grouping === "sources") void readDirectory(); });
+	useServerResync(() => { if (open && grouping === "sources") void readDirectory(); });
 	const changeOrganization: OrganizationChange = (action) => {
 		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
 		const operation = mutationTail.current.catch(() => {}).then(async () => {
@@ -794,6 +895,7 @@ export function ChainTableOverlay({
 		if (!open || deleteOpen) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
+				if (sessionFindHasForegroundLayer(document)) return;
 				// App Router delegates React events on document too: a child's
 				// stopPropagation cannot silence a sibling document listener.
 				if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
@@ -832,8 +934,12 @@ export function ChainTableOverlay({
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 			>
-				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
+				{(grouping === "sources" ? directoryFailure : projectsError) && <p role="alert" className="px-3 py-1 text-xs text-red-400">{grouping === "sources" ? directoryFailure : projectsError}</p>}
 				<ChainTableBody
+					grouping={grouping}
+					onGroupingChange={(value) => { setGrouping(value); setEntrySelection({ sources: new Set(), folders: new Set() }); }}
+					projects={projects ?? undefined}
+					projectId={projectId}
 					keyboardActive={!deleteOpen}
 					showEmptySources={showEmptySources}
 					onShowEmptySourcesChange={setShowEmptySources}
@@ -858,9 +964,9 @@ export function ChainTableOverlay({
 						)
 					}
 					selection={selection}
-					expandedClusters={expandedClusters}
+					expandedClusters={grouping === "projects" ? expandedProjects : expandedClusters}
 					expandedChains={expandedChains}
-					onToggleCluster={(key) => setExpandedClusters((prev) => toggleIn(prev, key))}
+					onToggleCluster={(key) => (grouping === "projects" ? setExpandedProjects : setExpandedClusters)((prev) => toggleIn(prev, key))}
 					onToggleChain={(id) => setExpandedChains((prev) => toggleIn(prev, id))}
 					onToggleNodes={toggleNodes}
 					onClear={() => { if (selectMode) applySelection(new Set()); else setEntrySelection({ sources: new Set(), folders: new Set() }); }}
