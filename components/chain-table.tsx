@@ -129,8 +129,12 @@ export function ChainTableBody({
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
+	showEmptySources = false,
+	onShowEmptySourcesChange,
 }: {
 	keyboardActive?: boolean;
+	showEmptySources?: boolean;
+	onShowEmptySourcesChange?: (show: boolean) => void;
 	directory?: SourceDirectory;
 	onOrganizationChange?: OrganizationChange;
 	selectedFolders?: ReadonlySet<string>;
@@ -253,7 +257,7 @@ export function ChainTableBody({
 			}
 		}
 		const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-		const list = [...map.values()];
+		const list = [...map.values()].filter((group) => showEmptySources || group.nodeIds.length > 0);
 		// Existing graph groups retain their newest-member date. Inventory-only
 		// rows fall back to record dates; a re-import must not redraft old dates.
 		for (const group of list) if (!group.newestCreatedAt && group.birth) group.newestCreatedAt = sourceRecords.get(group.birth)?.createdAt ?? "";
@@ -284,7 +288,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, showEmptySources]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -313,7 +317,12 @@ export function ChainTableBody({
 				</span>
 				{onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
 					onClick={() => setCreatingFolder(true)} className="lh-no-drag rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
-				<div className="relative shrink-0">
+				{directory && <label className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
+					<input type="checkbox" data-testid="chain-show-empty" checked={showEmptySources}
+						onChange={(event) => onShowEmptySourcesChange?.(event.target.checked)} className="size-3.5 accent-foreground" />
+					Показать пустые
+				</label>}
+				<div className="relative min-w-0 max-w-56 flex-1">
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 					<input
 						ref={searchRef}
@@ -323,7 +332,7 @@ export function ChainTableBody({
 						placeholder="Search nodes…"
 						aria-label="Search nodes"
 						spellCheck={false}
-						className="lh-no-drag h-8 w-56 rounded-lg border bg-background pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+						className="lh-no-drag h-8 w-full rounded-lg border bg-background pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
 					/>
 				</div>
 			<button
@@ -708,6 +717,7 @@ export function ChainTableOverlay({
 	onSelectionChange?: (next: ReadonlySet<string>) => void;
 }) {
 	const [query, setQuery] = useState("");
+	const [showEmptySources, setShowEmptySources] = useState(false);
 	const [sort, setSort] = useState<ChainSort>({ col: "name", dir: 1 });
 	const [internalSelection, setInternalSelection] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedClusters, setExpandedClusters] = useState<ReadonlySet<string>>(() => new Set());
@@ -825,6 +835,8 @@ export function ChainTableOverlay({
 				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
 				<ChainTableBody
 					keyboardActive={!deleteOpen}
+					showEmptySources={showEmptySources}
+					onShowEmptySourcesChange={setShowEmptySources}
 					directory={directory}
 					onOrganizationChange={directory ? changeOrganization : undefined}
 					selectedFolders={selectedFolders}

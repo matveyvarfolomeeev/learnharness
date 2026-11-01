@@ -24,7 +24,7 @@ let root: Root | undefined, host: HTMLDivElement | undefined;
 let actions: OrganizationAction[];
 async function mount() {
 	actions = []; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-	await act(async () => { root!.render(<ChainTableBody directory={directory} onOrganizationChange={async (a) => { actions.push(a); }}
+	await act(async () => { root!.render(<ChainTableBody showEmptySources directory={directory} onOrganizationChange={async (a) => { actions.push(a); }}
 		nodes={[{ id: "n1", name: "Node", statement: "Statement", aliases: [], provenance: [{ chatId: "a", messageId: "m1" }], createdAt: "2026-10-30" }]}
 		chains={[]} sessions={{}} fileSources={{}} query="" onQuery={() => {}} sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
 		expandedClusters={new Set(["f1", "f2", "a"])} expandedChains={new Set(["n1"])} onToggleCluster={() => {}} onToggleChain={() => {}}

@@ -26,6 +26,20 @@ async function click(id: string) {
 	const element = document.querySelector<HTMLElement>(`[data-testid="${id}"]`); assert.ok(element, id);
 	await act(async () => { element.click(); });
 }
+it("showing and hiding empty sources changes visibility without changing the directory or sending writes", async () => {
+	const current = directory(), before = JSON.stringify(current), methods: string[] = [];
+	globalThis.fetch = async (_url, init) => { methods.push(init?.method ?? "GET"); return Response.json(current); };
+	await mount(<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => {}} />);
+	assert.equal(document.querySelector('[data-testid="cluster-checkbox-a"]'), null);
+	await click("chain-show-empty");
+	assert.ok(document.querySelector('[data-testid="cluster-checkbox-a"]'));
+	assert.ok(document.querySelector('[data-testid="cluster-checkbox-b"]'));
+	await click("chain-show-empty");
+	assert.equal(document.querySelector('[data-testid="cluster-checkbox-a"]'), null);
+	assert.equal(document.querySelector('[data-testid="cluster-checkbox-b"]'), null);
+	assert.equal(JSON.stringify(current), before);
+	assert.deepEqual(methods, ["GET"]);
+});
 it("a failed deletion keeps its original confirmation targets for retry even after refresh prunes removed sources", async () => {
 	let current = directory(), revisions = 0;
 	const requests: { sourceIds: string[]; folderIds: string[]; deleteSessions: boolean }[] = [];
@@ -41,6 +55,7 @@ it("a failed deletion keeps its original confirmation targets for retry even aft
 	const onRevision = () => { revisions++; }; window.addEventListener("lh:graph-revision", onRevision);
 	try {
 		await mount(<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => {}} />);
+		await click("chain-show-empty");
 		await click("cluster-checkbox-a"); await click("chain-delete"); await click("source-delete-confirm");
 		assert.match(document.querySelector('[data-testid="source-delete-failure"]')!.textContent!, /Some entries/);
 		assert.equal(document.querySelector('[data-testid="cluster-checkbox-a"]'), null);
@@ -55,6 +70,7 @@ it("a failed deletion keeps its original confirmation targets for retry even aft
 it("clearing ordinary source selection does not clear the caller's independent practice node picks", async () => {
 	let changes = 0; globalThis.fetch = async () => Response.json(directory());
 	await mount(<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} controlledSelection={new Set(["practice-node"])} onSelectionChange={() => { changes++; }} onClose={() => {}} />);
+	await click("chain-show-empty");
 	await click("cluster-checkbox-a"); assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /1 source/);
 	await click("chain-clear"); assert.equal(document.querySelector('[data-testid="chain-selection-bar"]'), null); assert.equal(changes, 0);
 });
@@ -69,7 +85,7 @@ it("minimal home refreshes its snapshot and summary immediately after source del
 	};
 	await mount(<MinimalHome />);
 	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /1 imported note/);
-	await click("open-chain-table"); await click("cluster-checkbox-a"); await click("chain-delete"); await click("source-delete-confirm");
+	await click("open-chain-table"); await click("chain-show-empty"); await click("cluster-checkbox-a"); await click("chain-delete"); await click("source-delete-confirm");
 	assert.match(document.querySelector('[data-testid="knowledge-summary"]')!.textContent!, /0 imported notes/);
 	assert.equal(document.querySelector('[data-testid="cluster-checkbox-a"]'), null);
 });

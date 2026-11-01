@@ -99,6 +99,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 			if (target && !root?.contains(target) && target !== document.body && target !== document.documentElement) return;
 			const fromSearch = target === searchRef.current;
 			if (fromSearch ? event.key !== "ArrowDown" : target?.closest('input:not([type="checkbox"]),textarea,[contenteditable="true"]')) return;
+			if (target?.closest('input[type="checkbox"]') && !target.closest("[data-chain-nav-row]")) return;
 			if (event.key === " ") {
 				if (target?.closest('button,a[href],[role="button"]') && !target.closest("[data-chain-nav-row]")) return;
 				const row = readRows().find((row) => row.key === active.current);

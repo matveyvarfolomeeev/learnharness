@@ -30,7 +30,7 @@ function Harness() {
 	const [enabled, updateEnabled] = useState(true); setEnabled = updateEnabled;
 	const [clusters, updateClusters] = useState(new Set<string>()), [chains, updateChains] = useState(new Set<string>());
 	const toggle = (prev: Set<string>, id: string) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; };
-	return <ChainTableBody keyboardActive={enabled} directory={directory} nodes={nodes} chains={[{ id: "argument", premises: ["n1"], conclusion: "n2", provenance: [], createdAt: "2026-10-30" }]}
+	return <ChainTableBody showEmptySources keyboardActive={enabled} directory={directory} nodes={nodes} chains={[{ id: "argument", premises: ["n1"], conclusion: "n2", provenance: [], createdAt: "2026-10-30" }]}
 		sessions={{}} fileSources={{}} query={query} onQuery={updateQuery} sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
 		expandedClusters={clusters} expandedChains={chains} onToggleCluster={(id) => updateClusters((p) => toggle(p, id))} onToggleChain={(id) => updateChains((p) => toggle(p, id))}
 		onToggleNodes={() => { throw new Error("Navigation must not select nodes"); }} onClear={() => {}} onDelete={() => {}} onClose={() => {}}
@@ -115,6 +115,13 @@ it("Space clicks only the focused row's enabled checkbox; text editing and check
 	const checkbox = active()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 	checkbox.click = () => { clicks++; };
 	assert.equal((await key(" ")).defaultPrevented, true); assert.equal(clicks, 1);
+	const visibilityToggle = document.querySelector('[data-testid="chain-show-empty"]')!;
+	const previousRow = activeKey();
+	for (const k of [" ", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]) {
+		assert.equal((await key(k, visibilityToggle)).defaultPrevented, false);
+	}
+	assert.equal(clicks, 1, "the toolbar checkbox must not select a highlighted row");
+	assert.deepEqual(activeKey(), previousRow);
 	checkbox.disabled = true; assert.equal((await key(" ")).defaultPrevented, false); assert.equal(clicks, 1);
 	const search = document.querySelector('[data-testid="chain-table-search"]')!;
 	assert.equal((await key(" ", search)).defaultPrevented, false);

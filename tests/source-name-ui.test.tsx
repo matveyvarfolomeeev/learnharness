@@ -9,6 +9,8 @@ import { ServerEventsProvider } from "../components/server-events.tsx";
 const dom = parseHTML("<html><head></head><body></body></html>");
 // linkedom omits selection; native browser behavior is covered by the UI check.
 dom.window.HTMLInputElement.prototype.select = function () {};
+const nativeClick = dom.window.HTMLInputElement.prototype.click;
+dom.window.HTMLInputElement.prototype.click = function () { if (this.type === "checkbox") this.checked = !this.checked; nativeClick.call(this); };
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
 const originalFetch = globalThis.fetch;
 after(() => { globalThis.fetch = originalFetch; });
@@ -26,6 +28,7 @@ it("one Escape cancels inline source/folder editing without closing the overlay 
 		await act(async () => { root.render(<html><head /><body><ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>
 			<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => { closed++; }} />
 		</ServerEventsProvider></body></html>); });
+		await act(async () => { (document.querySelector('[data-testid="chain-show-empty"]') as HTMLInputElement).click(); });
 		for (const raw of ["null", "3", '"text"', "{"]) {
 			const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
 			Object.defineProperty(drop, "dataTransfer", { value: { getData: () => raw } });

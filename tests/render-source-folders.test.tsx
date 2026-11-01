@@ -27,7 +27,7 @@ const base: Parameters<typeof ChainTableBody>[0] = {
 const render = (props: Partial<typeof base> = {}) => renderToStaticMarkup(<ChainTableBody {...base} {...props} />);
 
 it("source inventory includes unextracted chats and zero-graph imported books; only real folders use folder icons", () => {
-	const html = render({ expandedClusters: new Set(["f1", "f2"]) });
+	const html = render({ showEmptySources: true, expandedClusters: new Set(["f1", "f2"]) });
 	assert.match(html, /Not yet extracted/); assert.match(html, /Named book/); assert.doesNotMatch(html, /original.pdf/);
 	assert.match(html, /lucide-book/); assert.match(html, /lucide-folder/);
 	assert.match(html, /data-testid="add-source-folder"/); assert.match(html, /data-testid="source-root-drop"/);
@@ -40,6 +40,26 @@ it("source inventory includes unextracted chats and zero-graph imported books; o
 	assert.match(html, /data-testid="source-icon-notes"[^>]*aria-expanded="false"/);
 	assert.match(html, /data-testid="cluster-group-notes"[^>]*style="margin-left:72px"/);
 	assert.doesNotMatch(html, /No matching chains/);
+});
+it("empty sources are hidden by default while populated sources and organizational folders remain available", () => {
+	const expandedClusters = new Set(["f1", "f2", "notes"]);
+	const empty = render({ expandedClusters });
+	assert.doesNotMatch(empty, /data-testid="cluster-group-(?:chat|notes)"/);
+	assert.match(empty, /data-testid="folder-row-empty"/);
+	assert.match(empty, /data-testid="add-source-folder"/);
+	assert.doesNotMatch(empty.match(/<input[^>]*data-testid="chain-show-empty"[^>]*>/)?.[0] ?? "", /checked/);
+	const populated = render({ nodes, expandedClusters });
+	assert.doesNotMatch(populated, /data-testid="cluster-group-chat"/);
+	assert.match(populated, /data-testid="cluster-group-notes"/);
+	assert.match(populated, /data-testid="chain-row-a"/);
+	assert.match(populated, /data-testid="chain-row-b"/);
+});
+it("search respects the empty-source filter and still finds populated sources by their source or folder name", () => {
+	assert.doesNotMatch(render({ query: "Not yet" }), /data-testid="cluster-group-chat"/);
+	assert.match(render({ query: "Not yet", showEmptySources: true }), /data-testid="cluster-group-chat"/);
+	for (const query of ["Named book", "Course"]) {
+		assert.match(render({ nodes, query }), /data-testid="cluster-group-notes"/);
+	}
 });
 it("nested folders aggregate unique graph member counts, keep three-column sorting and expose root placement", () => {
 	const html = render({ nodes, expandedClusters: new Set(["f1", "f2", "notes"]), selectedSources: new Set(["notes"]), selectedFolders: new Set(["f1", "f2"]) });
@@ -80,7 +100,7 @@ it("empty folder selection enables Delete outside practice, and practice never s
 	assert.doesNotMatch(practice, /data-testid="chain-delete"/);
 });
 it("ordinary browsing offers source/folder checks, including empty ones, but only practice offers fine-grained node checks", () => {
-	const html = render({ nodes, expandedClusters: new Set(["f1", "f2", "notes"]), expandedChains: new Set(["a", "b"]) });
+	const html = render({ showEmptySources: true, nodes, expandedClusters: new Set(["f1", "f2", "notes"]), expandedChains: new Set(["a", "b"]) });
 	assert.doesNotMatch(html, /data-testid="(?:prop|chain)-checkbox-/);
 	for (const id of ["cluster-checkbox-chat", "cluster-checkbox-notes", "folder-checkbox-f1", "folder-checkbox-f2", "folder-checkbox-empty"]) {
 		const tag = html.match(new RegExp(`<input[^>]*data-testid="${id}"[^>]*>`))?.[0];
@@ -93,7 +113,7 @@ it("source and folder names are searchable without needing any extracted nodes",
 	assert.equal(sourceNameMatches(directory, "notes", "Named book", "Course"), true);
 	assert.equal(sourceNameMatches(directory, "notes", "Named book", "Named"), true);
 	assert.equal(sourceNameMatches(directory, "notes", "Named book", "xyzxyz"), false);
-	assert.match(render({ query: "Not yet" }), /Not yet extracted/);
+	assert.match(render({ query: "Not yet", showEmptySources: true }), /Not yet extracted/);
 });
 it("source confirmation explains shared-node survival and makes conversation deletion an unchecked opt-in", () => {
 	const html = renderToStaticMarkup(<DeleteSourceBody sources={directory.sources} folders={[]} deleteSessions={false} onDeleteSessions={() => {}} busy={false} failure="" onClose={() => {}} onRun={() => {}} />);
