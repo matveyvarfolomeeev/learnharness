@@ -62,7 +62,7 @@ function options(data: ProjectCatalog, exclude?: string) {
 
 export function ProjectPicker({ value, onChange, disabled = false }: { value: string; onChange: (id: string) => void; disabled?: boolean }) {
 	const { data, error } = useProjects();
-	return <label className="lh-no-drag flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+	return <label className="lh-no-drag pointer-events-auto flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
 		<FolderIcon className="size-4 shrink-0" aria-hidden />
 		<span className="sr-only">Проект занятия</span>
 		<select aria-label="Проект занятия" className={`${field} max-w-full truncate text-xs`} value={value} disabled={disabled || !data} onChange={(e) => onChange(e.target.value)}>
