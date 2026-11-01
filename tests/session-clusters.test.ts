@@ -41,6 +41,30 @@ const node = (id: string, name: string, provenance: Array<{ chatId: string; mess
 	provenance,
 });
 
+describe("explicit subject organization", () => {
+	it("groups by subject without rewriting original provenance", () => {
+		const original = [pt("src_mixed")];
+		const assigned = { ...node("n_a", "Q-learning", original), subjectId: "src_rl" };
+		assert.equal(birthSessionOf(assigned), "src_rl");
+		assert.deepEqual(birthSessionPartition([assigned]), [{ id: "src_rl", members: ["n_a"] }]);
+		assert.deepEqual(assigned.provenance, [pt("src_mixed")]);
+		assert.equal(birthSessionOf({ ...assigned, subjectId: "" }), "src_mixed");
+	});
+	it("labels and lists a subject even when all original sources differ", () => {
+		const nodes = ["a", "b", "c"].map(id => ({ ...node(id, id, [pt("src_mixed")]), subjectId: "src_math" }));
+		const deps = fakeStores(nodes, { sources: [{ id: "src_math", filePath: "Математика", importedAt: "2026-10-30T00:00:00Z" }] });
+		assert.equal(graphSnapshot(deps).clusters[0]?.label, "Математика");
+		assert.deepEqual(graphSessionPropositions(deps, "src_math").map(n => n.nodeId), ["a", "b", "c"]);
+		assert.equal(graphSessionIndex(deps)[0]?.propositions, 3);
+	});
+	it("assigns a reasoning junction using its premises' displayed subjects", () => {
+		const nodes = ["a", "b", "c"].map(id => ({ ...node(id, id, [pt("src_mixed")]), subjectId: "src_math" }));
+		const clusters = birthSessionPartition(nodes);
+		attachImpToCommunities(clusters, nodes, [{ id: "arg_one", premises: ["a", "b"], conclusion: "c", provenance: [pt("src_mixed")] }]);
+		assert.deepEqual(clusters[0]!.members, ["a", "arg_one", "b", "c"]);
+	});
+});
+
 function fakeStores(
 	nodes: GraphNode[],
 	over: {

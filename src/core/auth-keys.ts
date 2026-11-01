@@ -31,6 +31,12 @@ export interface AuthKeyInfo {
 
 export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 	{
+		id: "GROQ_API_KEY",
+		label: "Groq",
+		description: "Whisper dictation and optional transcript cleanup.",
+		docsUrl: "https://console.groq.com/keys",
+	},
+	{
 		id: "DEEPGRAM_API_KEY",
 		label: "Deepgram",
 		description: "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens.",
@@ -167,6 +173,8 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			? { ok: true as const }
 			: { ok: false as const, error: `${id} must be at least ${min} characters with no whitespace` };
 	switch (id) {
+		case "GROQ_API_KEY":
+			return genericProviderKeyGuard(id, rawValue);
 		case "TAVILY_API_KEY":
 			return value.startsWith("tvly-")
 				? nonEmpty(20)

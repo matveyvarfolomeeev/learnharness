@@ -39,7 +39,16 @@ class AudioGraph {
 	audioWorklet = { addModule: async () => {} };
 	createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
 }
-class Worklet { port = {}; connect() {} disconnect() {} }
+class Worklet {
+	static all: Worklet[] = [];
+	port = {
+		onmessage: null as ((event: { data: { type: string; buffer?: Int16Array } }) => void) | null,
+		postMessage: (event: { type: string }) => { if (event.type === "flush") { this.audio(new Int16Array([5, 6])); this.port.onmessage?.({ data: { type: "flushed" } }); } },
+	};
+	constructor() { Worklet.all.push(this); }
+	audio(buffer: Int16Array) { this.port.onmessage?.({ data: { type: "audio", buffer } }); }
+	connect() {} disconnect() {}
+}
 
 const globals = globalThis as Record<string, unknown>;
 let restore: (() => void) | undefined;
@@ -58,8 +67,12 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		captures: 0,
 		stops: 0,
 		appends: [] as string[],
+		ready: true,
+		posts: [] as RequestInit[],
+		nextTranscription: undefined as Promise<Response> | undefined,
 	};
 	Socket.all = [];
+	Worklet.all = [];
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({
 		React, window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent,
@@ -72,6 +85,11 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		IS_REACT_ACT_ENVIRONMENT: true,
 		fetch: async (url: string, init?: RequestInit) => {
 			if (url === "/api/stt/token") return Response.json({ token: "test-token" });
+			if (url === "/api/stt/transcribe") {
+				if (init?.method !== "POST") return Response.json({ ready: state.ready });
+				state.posts.push(init);
+				return state.nextTranscription ?? Response.json({ text: "Теорема Коши." });
+			}
 			if (url === "/api/settings") {
 				state.reads++;
 				if (state.nextRead) { const response = state.nextRead; state.nextRead = undefined; return response; }
@@ -129,6 +147,61 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 }
 
 afterEach(async () => { await dispose?.(); restore?.(); dispose = undefined; restore = undefined; });
+
+test("Whisper keeps the recording and final audio tail, then finish waits for the single append", async () => {
+	const f = await fixture();
+	f.state.record.dictation = { language: "ru", engine: "whisper-large-v3", cleanup: true, glossary: "Коши" };
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(Socket.all.length, 0);
+	Worklet.all.at(-1)!.audio(new Int16Array(1600).fill(12));
+	const response = deferred<Response>(); f.state.nextTranscription = response.promise;
+	let ended = false;
+	await act(async () => { void f.dictation.finish().then(() => { ended = true; }); });
+	assert.equal(ended, false);
+	assert.equal(f.dictation.phase, "stopping");
+	const form = f.state.posts[0]!.body as FormData;
+	assert.equal(JSON.parse(form.get("settings") as string).engine, "whisper-large-v3");
+	const wav = await (form.get("file") as Blob).arrayBuffer();
+	assert.equal(wav.byteLength, 44 + 3204, "the final partial worklet frame is retained");
+	await act(async () => { response.resolve(Response.json({ text: "Теорема Коши." })); });
+	assert.equal(ended, true);
+	assert.deepEqual(f.state.appends, ["Теорема Коши."]);
+	assert.equal(f.state.active, false);
+});
+
+test("Whisper cancellation aborts upload and ignores even a late successful response", async () => {
+	const f = await fixture();
+	f.state.record.dictation = { language: "ru", engine: "whisper-large-v3-turbo" };
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all.at(-1)!.audio(new Int16Array(1600));
+	const response = deferred<Response>(); f.state.nextTranscription = response.promise;
+	await act(async () => { f.dictation.stop(); });
+	await act(async () => { f.dictation.cancel(); });
+	assert.equal(f.state.posts[0]!.signal!.aborted, true);
+	await act(async () => { response.resolve(Response.json({ text: "Поздний ответ" })); });
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.dictation.phase, "idle");
+});
+
+test("Whisper checks the key before capturing and cleanup failure still appends raw text", async () => {
+	const f = await fixture();
+	f.state.record.dictation = { language: "ru", engine: "whisper-large-v3" };
+	f.state.ready = false;
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	assert.match(f.dictation.error!, /ключ Groq/);
+	assert.equal(f.state.captures, 0);
+	f.state.ready = true;
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all.at(-1)!.audio(new Int16Array(1600));
+	f.state.nextTranscription = Promise.resolve(Response.json({ text: "Исходный текст.", warning: "Очистка пропущена" }));
+	await act(async () => { await f.dictation.finish(); });
+	assert.deepEqual(f.state.appends, ["Исходный текст."]);
+	assert.match(f.dictation.error!, /Очистка пропущена/);
+});
 
 test("waits for the saved language; reconnect preserves it and finals still flush exactly once", async () => {
 	const read = deferred<Response>();

@@ -1,3 +1,5 @@
+import { assignProject } from "@/src/server";
+import { UNASSIGNED_PROJECT } from "@/src/core";
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
 import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
@@ -20,7 +22,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown };
+	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; projectId?: unknown };
+	const catalog = stores.projectStore.read();
+	if (body.projectId !== undefined && (typeof body.projectId !== "string" || !catalog.projects.some((p) => p.id === body.projectId))) return Response.json({ error: "Проект не найден" }, { status: 400 });
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
@@ -33,6 +37,8 @@ export async function POST(req: Request) {
 	// (PUT /api/chats/:id/settings). No strong slot configured (fresh BYOK
 	// boot) → no stamp; the turn gate's 503 models_not_configured envelope
 	// refuses honestly until the setup flow fills the slot.
+	if (typeof body.projectId === "string") assignProject(chat.id, body.projectId);
+	else if (!catalog.autoDetect) assignProject(chat.id, UNASSIGNED_PROJECT);
 	const strong = readSettingsRecord()?.models?.strong;
 	if (strong?.model) {
 		stores.chatStore.saveSettings(chat.id, {

@@ -24,12 +24,13 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, Notification } = require("electron");
+const { createAnswerNotifications } = require("./answer-notifications.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
-const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { desktopAPIHeaders, HEADER: DESKTOP_HEADER } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
@@ -142,6 +143,7 @@ let subscriptionChild = null;
 // Per-launch request capability, never OAuth tokens and never renderer state.
 let desktopAPISecret = null;
 let reopenWindow = null;
+let answerNotifications = null;
 const trustedAppWindows = new Set();
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
@@ -227,6 +229,7 @@ function startServer(port) {
 			},
 		);
 		serverProcess = child;
+		child.on("message", (packet) => { if (packet?.channel === "lh:attention") void answerNotifications?.receive(packet); });
 		chatgptChild = attachChatGPTChild(child, chatgpt);
 		subscriptionChild = attachSubscriptionChild(child, subscriptions);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
@@ -339,6 +342,7 @@ function createWindow(url) {
 	});
 
 	trustedAppWindows.add(win);
+	win.on("focus", () => win.flashFrame(false));
 	win.once("closed", () => trustedAppWindows.delete(win));
 	const allowedOrigin = () => new URL(url).origin;
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
@@ -641,9 +645,11 @@ async function main() {
 
 	// The child must not outlive us — cover every quit path.
 	app.on("before-quit", killServer);
+	app.on("before-quit", () => answerNotifications?.dispose());
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
+	if (process.platform === "win32") app.setAppUserModelId("com.learnharness.LearnHarness");
 	await app.whenReady();
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
@@ -651,6 +657,25 @@ async function main() {
 	// (guards, menu, single instance).
 	const devUrl = process.env.LH_DEV_URL;
 	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+	answerNotifications = createAnswerNotifications({
+		Notification, log,
+		getWindow: () => BrowserWindow.getAllWindows().find((win) => trustedAppWindows.has(win)),
+		enabled: () => {
+			try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8")).general?.answerNotifications === true; }
+			catch { return false; }
+		},
+		getSnapshot: async (id) => {
+			if (!desktopAPISecret) return null;
+			const response = await fetch(new URL("/api/chats", url), { headers: { [DESKTOP_HEADER]: desktopAPISecret }, redirect: "error", signal: AbortSignal.timeout(5000) });
+			if (!response.ok) return null;
+			const value = await response.json();
+			return value.chats?.find((chat) => chat.id === id) ?? null;
+		},
+		openChat: (id) => {
+			const win = BrowserWindow.getAllWindows().find((candidate) => trustedAppWindows.has(candidate));
+			if (win && new URL(win.webContents.getURL()).pathname !== `/chat/${id}`) void win.loadURL(new URL(`/chat/${id}`, url).href).catch(() => log("notification navigation failed"));
+		},
+	});
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
 		const ownedOrigin = new URL(url).origin;
@@ -720,6 +745,10 @@ async function main() {
 	ipcMain.handle("lh:update:get", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		return updateState;
+	});
+	ipcMain.handle("lh:attention:test", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		return answerNotifications?.test() ?? false;
 	});
 	ipcMain.handle("lh:update:check", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");

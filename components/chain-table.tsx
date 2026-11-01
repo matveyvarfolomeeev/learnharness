@@ -1,5 +1,7 @@
 "use client";
 
+import { MasteryControl } from "./mastery";
+
 /**
  * THE CHAIN TABLE (chains overlay; owner refinements round 2, 2026-09-29):
  * every reasoning chain of the graph in one FULL-BLEED surface — the blur
@@ -232,7 +234,8 @@ export function ChainTableBody({
 		}
 		for (const chain of visibleChains) {
 			const conclusion = byId.get(chain.conclusion);
-			const birth = conclusion?.provenance[0]?.chatId ?? null;
+			// Source folders use provenance IDs; a project is not a deletable source.
+			const birth = (directory ? undefined : conclusion?.subjectId) ?? conclusion?.provenance[0]?.chatId ?? null;
 			const key = birth ?? "\0unlabeled";
 			let group = map.get(key);
 			if (!group) {
@@ -546,9 +549,10 @@ export function ChainTableBody({
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
 															/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
-															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+															<div className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
 																{node.statement}
-															</span>
+														<MasteryControl nodeId={id} summary={node.mastery} compact />
+															</div>
 															<span className="w-14 shrink-0" />
 															<span className="w-20 shrink-0" />
 														</div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { ProjectPicker } from "./projects";
+
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Conversation, ConversationContent, ConversationEmptyState } from "@/components/ai-elements/conversation";
@@ -47,6 +49,7 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	projectId?: string,
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -56,8 +59,8 @@ export async function startDraftSession(
 	// [id] name: statement lines, target validation's truth set).
 	return starter.start(
 		mode === "practice"
-			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			? { title: t, ...(projectId ? { projectId } : {}), kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
+			: { title: t, ...(projectId ? { projectId } : {}) },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -75,6 +78,7 @@ export function DraftShell({
 	onSend,
 	startError = false,
 	setupCta,
+	projectPicker,
 	mode = "teach",
 	picks = [],
 	onOpenPicker,
@@ -94,6 +98,7 @@ export function DraftShell({
 	 *  affordance home carries, rendered above the draft shell — passed by
 	 *  NewSession, which owns the configured state and the SetupDialog. */
 	setupCta?: ReactNode;
+	projectPicker?: ReactNode;
 	/** THE PICK BAR (owner round 10): the SAME pill the home screen
 	 *  carries above its composer — dashed "Pick nodes" when empty,
 	 *  count + Clear when picked. The draft screen has
@@ -182,6 +187,7 @@ export function DraftShell({
 						<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 						<div className="bg-background pb-4">
 							<div className={DOCK}>
+								<div className="mb-2">{projectPicker}</div>
 								<ComposerActions
 									picker={(picks.length > 0 || mode === "practice") && (
 										<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
@@ -229,14 +235,15 @@ export function DraftShell({
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({ initialConfigured, mode = "teach", initialProject = "", initialPicks = [], initialText = "" }: { initialConfigured: boolean; mode?: "teach" | "practice"; initialProject?: string; initialPicks?: DraftPick[]; initialText?: string }) {
+	const [projectId, setProjectId] = useState(initialProject);
 	const router = useRouter();
-	const [text, setText] = useState("");
+	const [text, setText] = useState(initialText);
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
 	 * finish-first send calls THIS send after the dictation flush — which
 	 * landed via setState and may not have re-rendered yet. The send reads
 	 * the mirror; every write keeps it current. */
-	const textRef = useRef("");
+	const textRef = useRef(initialText);
 	const applyText = (v: string) => {
 		textRef.current = v;
 		setText(v);
@@ -248,8 +255,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
-	const [picks, setPicks] = useState<DraftPick[]>([]);
-	const picksRef = useRef<DraftPick[]>([]);
+	const [picks, setPicks] = useState<DraftPick[]>(initialPicks);
+	const picksRef = useRef<DraftPick[]>(initialPicks);
 	const applyPicks = (next: DraftPick[]) => {
 		picksRef.current = next;
 		setPicks(next);
@@ -306,7 +313,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setBusy(true);
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+			starterRef.current, JSON.stringify(catalog?.slots.strong), projectId)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -316,11 +323,12 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [router, configured, zeroKeys, catalog, mode, projectId]);
 
 	return (
 		<>
 			<DraftShell
+				projectPicker={<ProjectPicker value={projectId} onChange={setProjectId} disabled={busy} />}
 				busy={busy}
 				startError={startError}
 				text={text}

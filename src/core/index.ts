@@ -16,6 +16,7 @@
  */
 
 export * from "./contracts.ts";
+export * from "./clarification.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
@@ -87,3 +88,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+export * from "./demo-runtime.ts";
+export * from "./mastery.ts";
+export * from "./projects.ts";

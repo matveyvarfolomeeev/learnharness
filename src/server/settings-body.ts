@@ -28,7 +28,7 @@ import type {
 } from "../core/settings.ts";
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
-import { isDictationLanguage } from "../core/dictation.ts";
+import { isDictationLanguage, isDictationEngine, MAX_DICTATION_GLOSSARY } from "../core/dictation.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -79,7 +79,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** General app preferences; unknown fields are dropped. */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -89,6 +89,14 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.chatGPTFastMode !== undefined) {
+		if (typeof raw.chatGPTFastMode !== "boolean") return { ok: false, error: "chatGPTFastMode must be a boolean" };
+		settings.chatGPTFastMode = raw.chatGPTFastMode;
+	}
+	if (raw.answerNotifications !== undefined) {
+		if (typeof raw.answerNotifications !== "boolean") return { ok: false, error: "answerNotifications must be a boolean" };
+		settings.answerNotifications = raw.answerNotifications;
 	}
 	return { ok: true, settings };
 }
@@ -226,6 +234,14 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AppearanceSettings = {};
+	if (raw.demoView !== undefined) {
+		if (raw.demoView !== "side" && raw.demoView !== "fullscreen") return { ok: false, error: "demoView must be side or fullscreen" };
+		settings.demoView = raw.demoView;
+	}
+	if (raw.demoSteps !== undefined) {
+		if (typeof raw.demoSteps !== "boolean") return { ok: false, error: "demoSteps must be a boolean" };
+		settings.demoSteps = raw.demoSteps;
+	}
 	if (raw.mode !== undefined) {
 		if (raw.mode !== "dark" && raw.mode !== "light") {
 			return { ok: false, error: "mode must be \"dark\" or \"light\"" };
@@ -400,9 +416,24 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
+	const settings: DictationSettings = {};
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	if (raw.engine !== undefined) {
+		if (!isDictationEngine(raw.engine)) return { ok: false, error: "Unsupported dictation engine" };
+		settings.engine = raw.engine;
+	}
+	if (raw.cleanup !== undefined) {
+		if (typeof raw.cleanup !== "boolean") return { ok: false, error: "cleanup must be a boolean" };
+		settings.cleanup = raw.cleanup;
+	}
+	if (raw.glossary !== undefined) {
+		if (typeof raw.glossary !== "string" || raw.glossary.length > MAX_DICTATION_GLOSSARY) return { ok: false, error: `Словарь: не более ${MAX_DICTATION_GLOSSARY} символов` };
+		settings.glossary = raw.glossary.trim();
+	}
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the

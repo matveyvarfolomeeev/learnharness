@@ -1,5 +1,7 @@
 "use client";
 
+import { ChatProjectPicker } from "./projects";
+
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
@@ -56,6 +58,8 @@ import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
+import { SelectionClarification } from "@/components/selection-clarification";
+import { DemoWorkspace } from "@/components/demo-workspace";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
@@ -1277,7 +1281,7 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-		<div className="flex h-dvh">
+		<DemoWorkspace key={chatId} chatId={chatId} scrollContextRef={scrollContextRef}>
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1327,7 +1331,8 @@ export function Chat({
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
 							    mousedown handler. */}
-							<div className="min-w-4 flex-1" aria-hidden="true" />
+
+					<div className="min-w-4 flex-1" aria-hidden="true" />
 						</>
 					) : (
 					<>
@@ -1353,6 +1358,7 @@ export function Chat({
 							<div className="min-w-4 flex-1" aria-hidden="true" />
 					</>
 					)}
+					<ChatProjectPicker chatId={chatId} />
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
@@ -1382,6 +1388,7 @@ export function Chat({
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
+					<SelectionClarification chatId={chatId} scopeRef={sessionFindScopeRef} />
 					{kind === "practice" ? (
 						<span
 							data-testid="phase-chip"
@@ -1558,7 +1565,7 @@ export function Chat({
 														const sourceId = textPartMessageId(part.id);
 														const anchor = sourceId && sourceTextParts.get(sourceId) === part.id ? messageAnchorId(sourceId) : undefined;
 														return (
-															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage">
+															<div key={part.id || pi} id={anchor} data-source-message-id={sourceId ?? undefined} className="lh-source-passage lh-transcript-block">
 																<MessageResponse>{part.text}</MessageResponse>
 															</div>
 														);
@@ -1794,7 +1801,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
-		</div>
+		</DemoWorkspace>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
 		{/* The BYOK setup flow (owner, 2026-09-22): one mount serves the
@@ -2168,11 +2175,14 @@ function DockOverlay({
 		const el = scrollRef.current;
 		const content = el?.firstElementChild as HTMLElement | null | undefined;
 		if (!el || !content) return;
-		let prevH = content.getBoundingClientRect().height;
-		const ro = new ResizeObserver(() => {
-			const h = content.getBoundingClientRect().height;
-			if (h > prevH + 0.5) growthAtRef.current = Date.now();
-			prevH = Math.max(prevH, h);
+		let prevH: number | undefined;
+		const ro = new ResizeObserver(([entry]) => {
+			if (!entry) return;
+			// The observer already measured this box. A synchronous rect read
+			// here forced layout of the entire math-heavy transcript on mount.
+			const h = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+			if (prevH !== undefined && h > prevH + 0.5) growthAtRef.current = Date.now();
+			prevH = Math.max(prevH ?? h, h);
 		});
 		ro.observe(content);
 		return () => ro.disconnect();

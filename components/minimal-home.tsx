@@ -81,6 +81,7 @@ export function KnowledgeSummary({
 }
 
 export function MinimalHome({
+	projectId = "",
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
@@ -88,6 +89,7 @@ export function MinimalHome({
 }: {
 	/** The lifted pick set drives the overlay's select mode (Done instead
 	 * of the delete fence); the chip in home's composer reflects it. */
+	projectId?: string;
 	chainSelectOpen?: boolean;
 	practiceSelection?: ReadonlySet<string>;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
@@ -99,7 +101,7 @@ export function MinimalHome({
 	const [chainsOpen, setChainsOpen] = useState(false);
 
 	const readState = useCallback(() => {
-		fetch("/api/graph")
+		fetch(`/api/graph${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`)
 			.then((res) => res.json() as Promise<GraphSnapshot>)
 			.then(setSnapshot)
 			.catch(() => {});
@@ -111,7 +113,7 @@ export function MinimalHome({
 			.then((res) => res.json() as Promise<{ chats: ChatSummary[] }>)
 			.then((body) => setChats(body.chats))
 			.catch(() => {});
-	}, []);
+	}, [projectId]);
 	useEffect(() => {
 		readState();
 		window.addEventListener("lh:graph-revision", readState);
@@ -125,7 +127,7 @@ export function MinimalHome({
 	}, [chainSelectOpen]);
 
 	// Refetch even after incomplete imports: earlier writes and spend remain.
-	const notesImport = useNotesImport({ onFinish: readState });
+	const notesImport = useNotesImport({ onFinish: readState, projectId });
 	const { importing, onImportFiles } = notesImport;
 
 	const teachSessions = chats.filter((c) => c.kind === "teach").length;

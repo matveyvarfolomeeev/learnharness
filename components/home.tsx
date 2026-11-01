@@ -1,5 +1,8 @@
 "use client";
 
+import { MASTERY_LABELS, type MasteryState } from "@/src/core";
+import { ProjectPicker } from "./projects";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
@@ -26,14 +29,19 @@ import type { TurnUsage } from "@/src/core";
 export function Home({
 	initialConfigured,
 	rendering = true,
+	initialProject = "",
 }: {
 	initialConfigured: boolean;
+	initialProject?: string;
 	/** GRAPH RENDERING off (owner, 2026-10-06): the home's main view is
 	 * the chains view, not the canvas. Read server-side per navigation —
 	 * changing the setting applies on the next visit home. */
 	rendering?: boolean;
 }) {
+	const [masteryFilter, setMasteryFilter] = useState<MasteryState | "all">("all");
 	const router = useRouter();
+	const [projectId, setProjectId] = useState(initialProject);
+	useEffect(() => { setProjectId(initialProject); }, [initialProject]);
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -145,6 +153,7 @@ export function Home({
 			// chains among them); the prompt stays the learner's own words.
 			const target = await starterRef.current.start({
 				title: t,
+				...(projectId ? { projectId } : {}),
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
@@ -178,14 +187,14 @@ export function Home({
 			    untouched, and the chain table stays behind its button. */}
 			<main className="absolute inset-0">
 				{rendering ? (
-					<GraphView
+					<GraphView key={initialProject} projectId={initialProject} masteryFilter={masteryFilter}
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
 						onChainSelectClose={() => setChainSelectOpen(false)}
 					/>
 				) : (
-					<MinimalHome
+					<MinimalHome key={initialProject} projectId={initialProject}
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
@@ -218,6 +227,7 @@ export function Home({
 					    send consumes it). Practice mode with nothing picked
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
+					<div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/95 p-2"><div className="min-w-0 flex-1"><ProjectPicker value={projectId} onChange={setProjectId} disabled={busy} /></div>{rendering && <select aria-label="Показать знания на графе" className="min-h-9 max-w-full rounded border border-border bg-background px-2 text-xs" value={masteryFilter} onChange={(e) => setMasteryFilter(e.target.value as MasteryState | "all")}><option value="all">На графе: все знания</option>{Object.entries(MASTERY_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>}</div>
 					<ComposerActions
 						picker={(practiceProps.length > 0 || mode === "practice") && (
 							<NodePickerControl

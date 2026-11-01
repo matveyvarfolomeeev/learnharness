@@ -1,3 +1,5 @@
+import { stores } from "@/src/server";
+import { projectOf } from "@/src/core";
 import { NewSession } from "@/components/new-session";
 import { readSettingsRecord } from "@/src/server";
 import { slotsConfigured } from "@/src/core";
@@ -18,11 +20,15 @@ export const dynamic = "force-dynamic";
 export default async function NewSessionPage({
 	searchParams,
 }: {
-	searchParams: Promise<{ mode?: string }>;
+	searchParams: Promise<{ mode?: string; project?: string; node?: string }>;
 }) {
-	const { mode } = await searchParams;
+	const { mode, project, node: nodeId } = await searchParams;
+	const node = mode === "practice" && nodeId ? stores.graphStore.readNodes().find((n) => n.id === nodeId) : undefined;
 	return (
 		<NewSession
+			initialProject={project ?? (node ? projectOf(node, stores.projectStore.read()) : undefined)}
+			initialPicks={node ? [{ id: node.id, name: node.name, statement: node.statement }] : []}
+			initialText={node ? `Проверь, насколько я понимаю и могу применить: ${node.name}.` : ""}
 			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
 			mode={mode === "practice" ? "practice" : "teach"}
 		/>

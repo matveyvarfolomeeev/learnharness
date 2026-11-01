@@ -81,6 +81,39 @@ export function isDictationLanguage(value: unknown): value is DictationLanguage 
 	return DICTATION_LANGUAGES.some(({ code }) => code === value);
 }
 
+export const DICTATION_ENGINES = [
+	{ id: "deepgram", label: "Deepgram Nova-3" },
+	{ id: "whisper-large-v3", label: "Whisper large-v3 · Groq" },
+	{ id: "whisper-large-v3-turbo", label: "Whisper Turbo · Groq" },
+] as const;
+export type DictationEngine = typeof DICTATION_ENGINES[number]["id"];
+export function isDictationEngine(value: unknown): value is DictationEngine {
+	return DICTATION_ENGINES.some((engine) => engine.id === value);
+}
+export const MAX_DICTATION_GLOSSARY = 600;
+export const MAX_DICTATION_PCM_BYTES = 16000 * 2 * 60 * 10;
+export const GROQ_DICTATION_KEYLESS = "Для Whisper нужен ключ Groq";
+
+/** PCM frames from the existing capture worklet; no codec dependency needed. */
+export function dictationWav(frames: readonly (ArrayBuffer | Int16Array)[]): ArrayBuffer {
+	const bytes = frames.reduce((n, frame) => n + frame.byteLength, 0);
+	if (bytes > MAX_DICTATION_PCM_BYTES || bytes % 2) throw new Error("Invalid dictation audio size");
+	const result = new ArrayBuffer(44 + bytes);
+	const view = new DataView(result);
+	const ascii = (offset: number, value: string) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+	ascii(0, "RIFF"); view.setUint32(4, 36 + bytes, true); ascii(8, "WAVEfmt ");
+	view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+	view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+	ascii(36, "data"); view.setUint32(40, bytes, true);
+	const output = new Uint8Array(result);
+	let offset = 44;
+	for (const frame of frames) {
+		output.set(frame instanceof ArrayBuffer ? new Uint8Array(frame) : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength), offset);
+		offset += frame.byteLength;
+	}
+	return result;
+}
+
 /** Only language varies. Keep the owner's tuned streaming parameters. */
 export function deepgramListenUrl(language: DictationLanguage): string {
 	return "wss://api.deepgram.com/v1/listen" +

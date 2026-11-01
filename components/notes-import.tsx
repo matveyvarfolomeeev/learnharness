@@ -44,8 +44,9 @@ export function parseNotesImportResults(body: unknown, files: readonly File[]): 
 	return body.results as NotesImportResult[];
 }
 
-export async function postNotesImport(files: readonly File[]): Promise<NotesImportResult[]> {
+export async function postNotesImport(files: readonly File[], projectId?: string): Promise<NotesImportResult[]> {
 	const form = new FormData();
+	if (projectId) form.append("projectId", projectId);
 	for (const file of files) {
 		form.append("files", file);
 		form.append("paths", notesPath(file));
@@ -64,7 +65,7 @@ export async function postNotesImport(files: readonly File[]): Promise<NotesImpo
 // Client module singleton: shared by both home views and successive selections.
 // SSR never appends Files, and uses the immutable empty server snapshot.
 const pageImportQueue = createNotesImportQueue(postNotesImport);
-export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () => void } = {}) {
+export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () => void; projectId?: string } = {}) {
 	const snapshot = useSyncExternalStore(pageImportQueue.subscribe, pageImportQueue.getSnapshot, () => EMPTY_IMPORT_QUEUE);
 	const latest = useRef(callbacks);
 	latest.current = callbacks;
@@ -80,7 +81,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 		onImportFiles: (files: FileList | null) => {
 			if (!files || files.length === 0) return;
 			latest.current.onStart?.();
-			pageImportQueue.append(Array.from(files));
+			pageImportQueue.append(Array.from(files), latest.current.projectId);
 		},
 	};
 }

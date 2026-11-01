@@ -131,6 +131,17 @@ it("PDFs are known by their bytes, not their names", async () => {
 	await POST(upload([{ name: "renamed.txt", bytes: pdf }, { name: "fake.pdf", bytes: "just text" }]));
 	assert.deepEqual(received.sort(), ["--- Page 1 ---\n\nInside a misnamed file", "just text"]);
 });
+it("a folder PDF keeps its relative source identity and selected project through conversion", async () => {
+	let received: { filePath: string; text: string; projectId?: string } | undefined;
+	extraction.importNotes = async (input) => { received = input; return { nodes: 1, chains: 0 }; };
+	const form = new FormData();
+	form.append("files", new File([tinyPdf([{ runs: [{ text: "A derivative is a limit", x: 72, y: 700 }] }])], "lecture.pdf"));
+	form.append("paths", "Math/Week 1/lecture.pdf"); form.append("projectId", "math");
+	const response = await POST(new Request("http://localhost/api/graph/import", { method: "POST", body: form }));
+	assert.equal(response.status, 200);
+	assert.equal(received?.filePath, "Math/Week 1/lecture.pdf"); assert.equal(received?.projectId, "math");
+	assert.match(received?.text ?? "", /A derivative is a limit/);
+});
 
 it("PDFs with nothing to import are refused before any model call", async () => {
 	let calls = 0;

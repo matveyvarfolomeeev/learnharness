@@ -75,10 +75,9 @@ export function resolveTargetId(
 	if (t.length === 0) return null;
 	if (nodes.some((n) => n.id === t)) return t;
 	const lower = t.toLowerCase();
-	for (const n of nodes) {
-		if (stripModelValueDebris(n.name).toLowerCase() === lower) return n.id;
-	}
-	return null;
+	const matches = new Set(nodes.filter((n) => stripModelValueDebris(n.name).toLowerCase() === lower).map((n) => n.id));
+	// Names are labels, not identities. An ambiguous label must never grade an arbitrary node.
+	return matches.size === 1 ? [...matches][0]! : null;
 }
 
 export function formatChainLine(

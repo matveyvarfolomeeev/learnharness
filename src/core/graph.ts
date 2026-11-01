@@ -71,7 +71,10 @@ import { sourceFileLabel } from "./source-label.ts";
 import type { ChatStore, GraphStore } from "./ports.ts";
 
 /** The storage ports every graph operation needs, passed explicitly. */
+import { inProjects, projectIds, projectOf, projectPath, type ProjectStore } from "./projects.ts";
+
 export interface GraphDeps {
+	projectStore?: ProjectStore;
 	chatStore: ChatStore;
 	graphStore: GraphStore;
 }
@@ -105,6 +108,7 @@ function chainKey(premises: ReadonlyArray<string>, conclusion: string): string {
  *  exactly this merge happened). The notes path passes neither and keeps
  *  the whole-file checkpoint. */
 export interface MergeSource {
+	subjectId?: string;
 	foldedAt: string;
 	/** The batch being merged (chat path): one entry per message in the
 	 *  extracted batch — undefined (notes path / coverage-less callers) →
@@ -197,6 +201,7 @@ export function mergeFindings(
 		} else {
 			const node: GraphNode = {
 				id: newGraphNodeId(),
+				...(source.subjectId ? { subjectId: source.subjectId } : {}),
 				name: p.name,
 				statement: p.statement,
 				aliases: [...p.aliases],
@@ -222,6 +227,7 @@ export function mergeFindings(
 	//    at read time; a known argument re-stated appends under the SAME
 	//    arg_ id — link-style, exactly like node link-appends; the first
 	//    line's premises/createdAt stand at read time).
+	const referenceNodes = new Map(getGraph(ledgers).nodes.map((n) => [n.id, n]));
 	const assertedByChat = new Set<string>();
 	const idOfKey = new Map<string, string>();
 	for (const line of ledgers.readChains()) {
@@ -245,6 +251,13 @@ export function mergeFindings(
 			(p): p is string => p !== undefined && p !== conclusion,
 		);
 		if (premises.length === 0) return; // a chain IS an argument — bare propositions ride the node ledger alone
+		for (const nodeId of [...premises, conclusion]) {
+			const node = referenceNodes.get(nodeId);
+			if (node && !node.provenance.some((pt) => pt.chatId === chatId)) {
+				ledgers.appendNode({ ...node, provenance: pointOf(chatId) });
+				node.provenance.push(...pointOf(chatId));
+			}
+		}
 		const key = chainKey(premises, conclusion);
 		if (assertedByChat.has(key)) return; // this chat already asserted this argument
 		const id = idOfKey.get(key) ?? newGraphChainId();
@@ -507,8 +520,15 @@ export function deriveView(graph: DerivedGraph): {
 // ─── the /api/graph payload ──────────────────────────────────────────────────
 
 /** Everything the home graph view needs, in one fetch (shape: contracts). */
-export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<string, string>> = {}): GraphSnapshot {
+export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<string, string>> = {}, projectId?: string): GraphSnapshot {
 	const graph = getGraph(deps.graphStore);
+	const catalog = deps.projectStore?.read();
+	if (projectId && catalog) {
+		const scope = projectIds(catalog, projectId);
+		graph.nodes = graph.nodes.filter((n) => inProjects(n, scope, catalog));
+		const ids = new Set(graph.nodes.map((n) => n.id));
+		graph.chains = graph.chains.filter((c) => ids.has(c.conclusion) && c.premises.every((p) => ids.has(p)));
+	}
 	// The canvas-facing lossy image: propositions + derived implication
 	// nodes, untyped arrows. `chains` (the stored truth) ride along for
 	// the chain table — it reads the truth, never the derived fan-out,
@@ -532,6 +552,9 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 	// (title, deep-linkable) and imported notes files (path, static — the
 	// format-agnostic front door's provenance).
 	const sourceIds = new Set<string>();
+	for (const node of graph.nodes) {
+		if (node.subjectId) sourceIds.add(node.subjectId);
+	}
 	for (const chats of nodeChats.values()) {
 		for (const id of chats) sourceIds.add(id);
 	}
@@ -547,6 +570,7 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 		if (source) fileSources[id] = source.filePath;
 	}
 
+	for (const project of catalog?.projects ?? []) fileSources[project.id] ??= project.name;
 	const nodeSessions: Record<string, string[]> = {};
 	for (const [nodeId, chats] of nodeChats) {
 		const ids = [...chats].filter((id) => sessions[id] !== undefined || fileSources[id] !== undefined);
@@ -563,7 +587,13 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 	// but renders unlabeled — honest, never guessed.
 	// PROPOSITIONS ONLY (owner, 2026-09-30): derived implication nodes
 	// never partition — the stored world clusters, its image follows.
-	const communities = birthSessionPartition(graph.nodes);
+	const groupedNodes = catalog ? graph.nodes.map((node) => {
+		const path = projectPath(catalog, projectOf(node, catalog));
+		const at = projectId ? path.findIndex((p) => p.id === projectId) + 1 : 0;
+		const group = projectId && !path.some((p) => p.id === projectId) ? catalog.projects.find((p) => p.id === projectId) : path[at] ?? path.at(-1);
+		return { ...node, subjectId: group?.id ?? projectId ?? node.subjectId };
+	}) : graph.nodes;
+	const communities = birthSessionPartition(groupedNodes);
 	const clusters: Cluster[] = communities
 		.filter((community) => community.members.length >= MIN_CLUSTER_SIZE)
 		.map((community) => {
@@ -571,7 +601,7 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 			const file = fileSources[community.id];
 			return {
 				id: community.id,
-				label: sessions[community.id] ?? (file === undefined ? null : sourceNames[community.id] ?? sourceFileLabel(file)),
+				label: catalog?.projects.find((p) => p.id === community.id)?.name ?? sessions[community.id] ?? (file === undefined ? null : sourceNames[community.id] ?? sourceFileLabel(file)),
 				members: community.members,
 			};
 		});
@@ -581,7 +611,7 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 	// never resurrects a hull (the filter counts propositions). Both
 	// cluster-membership consumers — the sim's centroid pull and the
 	// canvas's region rasterization — read it through this one list.
-	attachImpToCommunities(clusters, graph.nodes, graph.chains);
+	attachImpToCommunities(clusters, groupedNodes, graph.chains);
 
 	// Resting layout (Option A): the positions ledger, when the settle has
 	// ever run. Absent on a fresh graph — the view falls back to its own
@@ -617,7 +647,7 @@ export interface GraphSessionEntry {
 	/** The chat's title, or the file's path — the cluster label's source. */
 	name: string;
 	/** A real chat (its record still exists) or an imported notes file. */
-	kind: "chat" | "file";
+	kind: "chat" | "file" | "project";
 	/** When the session began: the chat's createdAt, or the file's
 	 *  importedAt. null when no record can date it. */
 	createdAt: string | null;
@@ -633,6 +663,11 @@ export interface GraphSessionEntry {
 /** The prober's session list: every birth session, most-recently-active
  *  first (undatable records sink, in stable id order). */
 export function graphSessionIndex(deps: GraphDeps): GraphSessionEntry[] {
+	if (deps.projectStore) {
+		const catalog = deps.projectStore.read();
+		const nodes = getGraph(deps.graphStore).nodes;
+		return catalog.projects.map((p) => ({ id: p.id, name: projectPath(catalog, p.id).map((a) => a.name).join(" / "), kind: "project" as const, createdAt: p.createdAt, updatedAt: null, propositions: nodes.filter((n) => inProjects(n, projectIds(catalog, p.id), catalog)).length }));
+	}
 	const counts = new Map<string, number>();
 	const born = getGraph(deps.graphStore);
 	for (const cluster of birthSessionPartition(born.nodes)) {
@@ -683,7 +718,9 @@ export interface GraphSessionProposition {
 /** The propositions BORN in one session — what that session first
  *  articulated. Members sorted by node id — deterministic. */
 export function graphSessionPropositions(deps: GraphDeps, sessionId: string): GraphSessionProposition[] {
-	const born = getGraph(deps.graphStore).nodes.filter((node) => birthSessionOf(node) === sessionId);
+	const catalog = deps.projectStore?.read();
+	const scope = catalog?.projects.some((p) => p.id === sessionId) ? projectIds(catalog, sessionId) : null;
+	const born = getGraph(deps.graphStore).nodes.filter((node) => scope && catalog ? inProjects(node, scope, catalog) : birthSessionOf(node) === sessionId || node.provenance.some((p) => p.chatId === sessionId));
 	return born
 		.map((node) => ({ nodeId: node.id, name: node.name }))
 		.sort((a, b) => (a.nodeId < b.nodeId ? -1 : 1));

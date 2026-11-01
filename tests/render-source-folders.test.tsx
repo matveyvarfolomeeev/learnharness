@@ -47,6 +47,13 @@ it("nested folders aggregate unique graph member counts, keep three-column sorti
 	assert.match(html, /data-testid="sort-name"/); assert.match(html, /data-testid="sort-props"/); assert.match(html, /data-testid="sort-created"/);
 	assert.match(html, /lucide-book-open/); assert.match(html, /draggable="true"/);
 });
+it("project-assigned knowledge stays nested under its real source folder", () => {
+	const html = render({ nodes: nodes.map((node) => ({ ...node, subjectId: "math-project" })), expandedClusters: new Set(["f1", "f2", "notes"]) });
+	assert.match(html, /data-testid="chain-row-a"/);
+	assert.match(html, /data-testid="chain-row-b"/);
+	assert.doesNotMatch(html, /cluster-group-math-project/);
+	assert.match(html, /data-testid="cluster-group-notes"[^>]*style="margin-left:72px"/);
+});
 it("collapsed folders have no dangling rail, while expanded folders reuse the source/chain bracket grammar", () => {
 	assert.doesNotMatch(render(), /data-testid="folder-thread-/);
 	const html = render({ expandedClusters: new Set(["f1"]) });

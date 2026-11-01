@@ -1,3 +1,6 @@
+import { masteryView } from "./mastery.ts";
+import { MASTERY_FILE } from "../store/mastery.ts";
+import { PROJECTS_FILE } from "../store/projects.ts";
 import * as fs from "node:fs";
 import { LEDGER_FILES, POSITIONS_FILE } from "../../config.ts";
 import type { GraphSnapshot } from "../core/contracts.ts";
@@ -19,10 +22,13 @@ import { callCost } from "./pricing.ts";
  * answers in sessions (turn-service), never from here — the home view
  * reflects whatever the pipeline has merged so far.
  */
-export function graphView(): GraphSnapshot {
+export function graphView(projectId?: string): GraphSnapshot {
 	const organization = stores.sourceOrganizationStore.read();
 	const names = Object.fromEntries(Object.entries(organization.placements).flatMap(([id, p]) => p.name === undefined ? [] : [[id, p.name]]));
-	return graphSnapshot(stores, names);
+	const snapshot = graphSnapshot(stores, names, projectId);
+	const mastery = masteryView(snapshot.propositions.map((n) => n.id));
+	for (const node of snapshot.propositions) node.mastery = mastery[node.id];
+	return snapshot;
 }
 
 /** The graph view's cost surface (GET /api/graph/costs — the 2026-09 cost
@@ -62,6 +68,8 @@ export function graphRevision(): number {
 		LEDGER_FILES.sessions,
 		LEDGER_FILES.coverage,
 		POSITIONS_FILE,
+		PROJECTS_FILE,
+		MASTERY_FILE,
 	]) {
 		try {
 			revision = Math.max(revision, fs.statSync(file).mtimeMs);

@@ -5,9 +5,13 @@
  */
 
 export * from "./chat-handler.ts";
+export { handleClarification } from "./clarification.ts";
+export { dictationReady, handleDictation } from "./dictation.ts";
 export * from "./events-stream.ts";
 export * from "./chats.ts";
 export * from "./graph.ts";
+export * from "./projects.ts";
+export { saveManualMastery } from "../store/mastery.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
 export { NotesImportError } from "../agent/subagents/extraction.ts";

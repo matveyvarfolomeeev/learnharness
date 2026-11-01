@@ -186,9 +186,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 	return {
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
+			chatGPTFastMode: record?.general?.chatGPTFastMode ?? FACTORY_SETTINGS.general.chatGPTFastMode,
+			answerNotifications: record?.general?.answerNotifications ?? FACTORY_SETTINGS.general.answerNotifications,
 		},
 		dictation: {
-			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+			...FACTORY_SETTINGS.dictation,
+			...record?.dictation,
 		},
 		agent: {
 			models,
@@ -203,6 +206,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			vision: resolveSlot(modelsSection.vision),
 		},
 		appearance: {
+			demoView: appearance.demoView ?? factoryAppearance.demoView,
+			demoSteps: appearance.demoSteps ?? factoryAppearance.demoSteps,
 			mode: appearance.mode ?? factoryAppearance.mode,
 			background: appearance.background ?? factoryAppearance.background,
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,

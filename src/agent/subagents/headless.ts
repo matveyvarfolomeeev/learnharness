@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { standardFontsDir } from "./pdf-ops";
+import { buildDemoSrcDoc } from "../../core/demo-runtime.ts";
 
 /**
  * Verification engines for sub-agents: demos use the app's own Electron
@@ -33,6 +34,8 @@ export interface DemoRunResult {
 }
 
 export interface RunDemoOptions {
+	/** Validate new demo presentation using the same bridge as the sandbox viewer. */
+	presentation?: boolean;
 	/** How long to let the page settle (animations, async CDN loads) — default 2s. */
 	settleMs?: number;
 	/** Optional JS expression evaluated in the page after settling; its value
@@ -284,7 +287,7 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
 	const settleMs = opts.settleMs ?? 2000;
 	const dir = tempDir("lh-demo-");
 	const file = path.join(dir, "demo.html");
-	fs.writeFileSync(file, html, "utf-8");
+	fs.writeFileSync(file, opts.presentation ? buildDemoSrcDoc(html) : html, "utf-8");
 
 	const consoleErrors: string[] = [];
 	const pageErrors: string[] = [];
@@ -303,6 +306,27 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
 		try {
 			await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
 			await new Promise((resolve) => setTimeout(resolve, settleMs));
+			if (opts.presentation) {
+				for (const viewport of [{ width: 480, height: 640 }, { width: 1100, height: 720 }]) {
+					await page.setViewport(viewport);
+					const info = await page.evaluate(() => (window as unknown as { __lhDemoRuntime?: { supported: boolean; count: number } }).__lhDemoRuntime && {
+						supported: (window as unknown as { __lhDemoRuntime: { supported: boolean } }).__lhDemoRuntime.supported,
+						count: (window as unknown as { __lhDemoRuntime: { count: number } }).__lhDemoRuntime.count,
+					});
+					if (!info?.supported) { pageErrors.push("presentation: one data-lh-demo-stage and named sibling data-lh-demo-step sections are required"); break; }
+					for (const steps of [true, false]) {
+						for (let index = 0; index < (steps ? info.count : 1); index++) {
+							const issues = await page.evaluate(async (steps, index) => {
+								const runtime = (window as unknown as { __lhDemoRuntime: { setSteps: (on: boolean) => void; go: (i: number) => void; inspect: () => { issues: string[] } } }).__lhDemoRuntime;
+								runtime.setSteps(steps); runtime.go(index);
+								await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+								return runtime.inspect().issues;
+							}, steps, index);
+							pageErrors.push(...issues.map((issue) => `presentation ${viewport.width}x${viewport.height}, ${steps ? `step ${index + 1}` : "all steps"}: ${issue}`));
+						}
+					}
+				}
+			}
 			if (opts.probe) {
 				try {
 					probeResult = await page.evaluate(opts.probe);

@@ -51,7 +51,7 @@ import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
 import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
 import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
-import { headlessOverride, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
+import { headlessOverride, type DemoRunResult, type HeadlessApi, type RunDemoOptions } from "../src/agent/subagents/headless.ts";
 import { createJobRunner, demoModelOverride, visualModelOverride } from "../src/agent/subagents/runner.ts";
 import { runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
 import { buildAbortSteer, buildSubagentSteer, isSubagentFailure, setSteerUiInverted, type SteerMessage } from "../src/core/contracts.ts";
@@ -163,7 +163,8 @@ function fakeHeadless(opts: {
 		unavailableReason() {
 			return null;
 		},
-		async runDemo(html: string): Promise<DemoRunResult> {
+		async runDemo(html: string, runOptions?: RunDemoOptions): Promise<DemoRunResult> {
+			assert.equal(runOptions?.presentation, true, "builder always verifies the shared presentation contract");
 			api.demoRuns.push(html);
 			return opts.brokenWhenIncludes && html.includes(opts.brokenWhenIncludes) ? BROKEN_RUN : CLEAN_RUN;
 		},
@@ -352,16 +353,14 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 });
 
 describe("steer card rendering (the delivered artifact)", () => {
-	it("renders a sandboxed demo iframe (allow-scripts, NO allow-same-origin) with the bridge injected", () => {
+	it("renders a compact demo launch card without running its HTML in the transcript", () => {
 		const steer = buildSubagentSteer(
 			{ id: "jd", kind: "demo", toolCallId: "cd" },
 			{ title: "Damped oscillator", html: DEMO_HTML, tested: true },
 		);
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
-		assert.match(html, /sandbox="allow-scripts"/);
-		assert.ok(!html.includes("allow-same-origin"), "never allow-same-origin");
-		assert.match(html, /demo-resize/);
-		assert.match(html, /demo-error/);
+		assert.ok(!html.includes("<iframe"), "no running demo before the learner opens it");
+		assert.match(html, /data-testid="demo-open"/);
 		assert.match(html, /Damped oscillator/);
 		assert.match(html, /interactive demo/i);
 		// the model-facing protocol text never renders for the learner
@@ -488,17 +487,17 @@ describe("steer card rendering (the delivered artifact)", () => {
 
 
 describe("artifact chrome — scrollbar, invert toggles, downloads (release polish 2026-10-07)", () => {
-	it("demo iframe: scrolling OFF (the bridge auto-sizes; a scrollable iframe traps the wheel) and the invert + download buttons render", () => {
+	it("demo launch card keeps invert and download controls without a tall iframe", () => {
 		const steer = buildSubagentSteer(
 			{ id: "jd3", kind: "demo", toolCallId: "cd3" },
 			{ title: "Wave interference", html: DEMO_HTML, tested: true },
 		);
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
-		assert.match(html, /scrolling="no"/, "no internal scrollbar — the wheel chains to the session");
+		assert.ok(!html.includes("<iframe"));
 		assert.match(html, /toggle-invert-demo-brightness/, "the invert switch (house Toggle)");
 		assert.match(html, /data-testid="demo-download"/);
 		assert.ok(!html.includes("hue-rotate"), "inversion is OFF by default — a manual toggle only");
-		assert.match(html, /interactive demo/, "the kind label lives in the caption header");
+		assert.match(html, /interactive demo/i, "the kind label lives in the caption header");
 		assert.match(html, /Wave interference/, "the title rides beside the kind label");
 	});
 

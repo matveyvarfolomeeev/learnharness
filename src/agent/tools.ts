@@ -263,7 +263,10 @@ export const probeExplainTool: AgentTool<typeof explainInputBase> = {
 /** The prober's registry context: the probe's own needs (probe_done —
  *  ProbeDoneContext) PLUS the job-dispatch wiring, since the owner ruling
  *  (2026-09-20) puts research + pdf in the probe phase's registry too. */
+import type { ProjectStore } from "../core/projects.ts";
+
 export interface ProberToolContext extends ProbeDoneContext {
+	projectStore?: ProjectStore;
 	/** Creates the job record (deduped by toolCallId). */
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
@@ -337,7 +340,7 @@ export function createProberTools(
 				// The map reader (wave 7): present only when the settings gate
 				// opened.
 				...(ctx.graphStore
-					? proberGraphTools({ chatStore: ctx.chatStore, graphStore: ctx.graphStore })
+					? proberGraphTools({ chatStore: ctx.chatStore, graphStore: ctx.graphStore, projectStore: ctx.projectStore })
 					: {}),
 				...done,
 			},

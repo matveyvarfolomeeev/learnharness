@@ -239,23 +239,23 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 	});
 
 	it("stored provider keys land in providerRows; the Add dropdown drops them", () => {
-		const out = classifyKeys([synth("GROQ_API_KEY", true)], providers);
+		const out = classifyKeys([synth("DEEPSEEK_API_KEY", true)], providers);
 		assert.equal(out.providerRows.length, 1);
-		assert.equal(out.providerRows[0]!.id, "GROQ_API_KEY");
-		// the Add dropdown no longer offers groq
-		assert.ok(!out.addable.some((p) => p.id === "groq"));
-		assert.ok(out.addable.some((p) => p.id === "deepseek"));
+		assert.equal(out.providerRows[0]!.id, "DEEPSEEK_API_KEY");
+		assert.ok(!out.addable.some((p) => p.id === "deepseek"));
+		assert.ok(out.addable.some((p) => p.id === "openrouter"));
 	});
 
 	it("curated tool ids always render (synthesized when absent)", () => {
 		const out = classifyKeys([synth("DEEPGRAM_API_KEY", true)], undefined);
 		assert.deepEqual(out.toolRows.map((r) => r.id), [
+			"GROQ_API_KEY",
 			"DEEPGRAM_API_KEY",
 			"TAVILY_API_KEY",
 			"BRAVE_API_KEY",
 		]);
-		assert.ok(out.toolRows[0]!.present);
-		assert.ok(!out.toolRows[1]!.present);
+		assert.ok(out.toolRows.find((row) => row.id === "DEEPGRAM_API_KEY")!.present);
+		assert.ok(!out.toolRows.find((row) => row.id === "GROQ_API_KEY")!.present);
 	});
 
 	it("unknown file vars surface read-only, out of the provider rows", () => {

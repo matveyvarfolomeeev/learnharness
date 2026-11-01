@@ -26,7 +26,11 @@ import { createPropositionCandidateSearch, propositionCandidateBatch, type Candi
  */
 
 /** What the graph tools close over: the stores the session views read. */
+import type { ProjectStore } from "../../core/projects.ts";
+
 export interface GraphToolContext {
+	readMastery?: import("../../core/mastery.ts").MasteryReader;
+	projectStore?: ProjectStore;
 	chatStore: ChatStore;
 	graphStore: GraphStore;
 }
@@ -41,13 +45,13 @@ const listPropositionsInput = Type.Object({
 });
 
 export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
-	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
+	const deps = ctx;
 	return {
 		list_sessions: {
 			name: "list_sessions",
 			label: "list_sessions",
 			description:
-				"List the sessions of the learner's persistent knowledge graph — every chat or imported-notes file that ever contributed a proposition, most recent first. The map is organized into birth-session clusters (propositions grouped by the session they were first learned in), and session names are those clusters' labels. " +
+				"List the sessions of the learner's persistent knowledge graph — every chat or imported-notes file that ever contributed a proposition, most recent first. The map is organized into subject projects when available; parents include their subprojects. Listed material is not evidence of mastery. " +
 				"Each line: the session's name, kind (chat/file), how many propositions were born in it, its dates, and its id — use that id with list_propositions. " +
 				"Reading this first shows what he has already covered and when, before you probe anything.",
 			parameters: listSessionsInput,
@@ -119,7 +123,7 @@ export function prepareAuditorReview(ctx: GraphToolContext, propositions: readon
 	initialCandidates: AuditorCandidateBatch;
 	tools: Record<string, AgentTool<any>>;
 } {
-	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
+	const deps = ctx;
 	const findInput = Type.Object({
 		propositions: Type.Array(Type.Object({
 			id: Type.String({ minLength: 1, description: "An id from the proposed findings. Its name, statement and aliases are searched automatically." }),
@@ -206,4 +210,50 @@ export function prepareAuditorReview(ctx: GraphToolContext, propositions: readon
 		},
 	};
 	return { initialCandidates, tools };
+}
+
+/** Project extractors can explore existing knowledge before drafting findings. */
+function globMatch(pattern: string, text: string): boolean {
+	const raw = pattern.includes("*") ? pattern : `*${pattern}*`;
+	const re = new RegExp(
+		`^${raw.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "*" ? "[\\s\\S]*" : `\\${ch}`))}$`,
+		"i",
+	);
+	return re.test(text);
+}
+
+export function projectGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
+	const deps = ctx;
+	const { list_sessions, list_propositions } = prepareAuditorReview(ctx).tools;
+	const findInput = Type.Object({ query: Type.String({ minLength: 1, description: "Words or glob pattern over names, statements and aliases." }) });
+	return { list_sessions: list_sessions!, list_propositions: list_propositions!,
+		find: {
+			name: "find",
+			label: "find",
+			description:
+				"Search the knowledge graph for existing propositions — glob over names, statements, and aliases. " +
+				"Returns each match's id, name, full statement, and the session(s) it was born in (a list_propositions id). " +
+				"This is how you decide whether a new proposition IS an existing one: search its key words, its synonyms, its phrasings.",
+			parameters: findInput,
+			execute: serverExecute("find", findInput, async ({ query }): Promise<string> => {
+				const nodes = getGraph(deps.graphStore).nodes;
+				const hits = nodes.filter(
+					(n) => globMatch(query, n.name) || globMatch(query, n.statement) || n.aliases.some((a) => globMatch(query, a)),
+				);
+				if (hits.length === 0) return `No existing proposition matches "${query}".`;
+				// BORN-IN POINTER (owner, 2026-09-29): a hit names its birth
+				// session(s) — find results now compose with list_propositions
+				// (read the whole session the hit came from) instead of being
+				// dead ends. Legacy no-provenance nodes name none.
+				const lines = hits.map((n) => {
+					const born = [...new Set(n.provenance.map((pt) => pt.chatId))];
+					return (
+						`- ${n.id} :: ${n.name}\n  statement: ${n.statement}` +
+						(born.length > 0 ? `\n  born in: ${born.join(", ")}` : "")
+					);
+				});
+				return `${hits.length} match(es):\n${lines.join("\n")}`;
+			}),
+		},
+	};
 }

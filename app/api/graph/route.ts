@@ -8,6 +8,6 @@ import { graphView } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-	return Response.json(graphView());
+export async function GET(request: Request) {
+	return Response.json(graphView(new URL(request.url).searchParams.get("project") ?? undefined));
 }

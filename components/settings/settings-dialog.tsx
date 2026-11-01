@@ -40,7 +40,7 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsRow, SettingsSection, Toggle } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -143,6 +143,7 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const [appearanceSaving, setAppearanceSaving] = useState(false);
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -360,6 +361,15 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
+									<SettingsRow label="Notify when an answer is needed" testid="row-answer-notifications" hint="Show a desktop notification for a new question while LearnHarness is in the background. Click it to return to the dialogue.">
+										<div className="flex items-center gap-3">
+											<button type="button" className="text-xs underline underline-offset-2" data-testid="test-answer-notification" onClick={() => void window.lh?.testInputNotification?.().then((shown) => { if (!shown) window.alert("The notification could not be shown. Check Windows notification settings."); }).catch(() => window.alert("The notification could not be shown."))}>Test</button>
+											<Toggle checked={record.general?.answerNotifications === true} label="Answer notifications" onChange={(on) => void write("general", { ...record.general, answerNotifications: on })} />
+										</div>
+									</SettingsRow>
+									<SettingsRow label="GPT-6.1 Sol · Fast mode" testid="row-chatgpt-fast-mode" hint="Faster ChatGPT replies with the same reasoning level. Uses included limits at 2.5×. Applies to conversation turns.">
+										<Toggle checked={record.general?.chatGPTFastMode === true} label="ChatGPT Fast mode" onChange={(on) => void write("general", { ...record.general, chatGPTFastMode: on })} />
+									</SettingsRow>
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
@@ -400,12 +410,17 @@ export function SettingsDialogBody({
 									title="Appearance"
 									testid="section-appearance"
 								>
+									<fieldset disabled={appearanceSaving}>
 									<AppearanceSection
 										appearance={record.appearance}
-										onSectionChange={(next: AppearanceSettings) =>
-											void write("appearance", next)
-										}
+										onSectionChange={(next: AppearanceSettings) => {
+											// Whole-section writes must finish before another control edits its mirror.
+											setAppearanceSaving(true);
+											void write("appearance", next).catch(() => setError("Appearance: could not save settings"))
+												.finally(() => setAppearanceSaving(false));
+										}}
 									/>
+									</fieldset>
 								</SettingsSection>
 							)}
 							{active === "graph" && (

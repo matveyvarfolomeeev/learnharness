@@ -227,6 +227,39 @@ describe("General update rows", () => {
 });
 
 describe("Settings integration", () => {
+	it("notification toggle preserves Fast and the Test button uses only the native bridge", async () => {
+		bridge(); let previews = 0;
+		window.lh!.testInputNotification = async () => { previews++; return true; };
+		const record = { version: 1, general: { chatGPTFastMode: true, answerNotifications: true } };
+		const puts: unknown[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method === "PUT") { const body = JSON.parse(String(init.body)); puts.push(body); return Response.json({ settings: { ...record, general: body } }); }
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		await click(q(host, "test-answer-notification")); assert.equal(previews, 1); assert.deepEqual(puts, []);
+		await click(q(host, "toggle-answer-notifications"));
+		assert.deepEqual(puts, [{ chatGPTFastMode: true, answerNotifications: false }]);
+		assert.equal(q(host, "toggle-answer-notifications")!.getAttribute("aria-checked"), "false");
+	});
+	it("Fast toggles persist the whole General section and show the usage multiplier", async () => {
+		bridge();
+		const record = { version: 1, general: { autoUpdate: false, chatGPTFastMode: true } };
+		const puts: unknown[] = [];
+		globalThis.fetch = async (_input, init) => {
+			if (init?.method === "PUT") {
+				const body = JSON.parse(String(init.body)); puts.push(body);
+				return Response.json({ settings: { ...record, general: body } });
+			}
+			return Response.json({ settings: record });
+		};
+		const host = await mount(<SettingsDialogBody initialSection="general" onClose={() => {}} />);
+		assert.ok(q(host, "row-chatgpt-fast-mode")!.textContent!.includes("2.5×"));
+		assert.equal(q(host, "toggle-chatgpt-fast-mode")!.getAttribute("aria-checked"), "true");
+		await click(q(host, "toggle-chatgpt-fast-mode"));
+		assert.deepEqual(puts, [{ autoUpdate: false, chatGPTFastMode: false }]);
+		assert.equal(q(host, "toggle-chatgpt-fast-mode")!.getAttribute("aria-checked"), "false");
+	});
 	it("the toggle sends the complete General section and follows stored server truth", async () => {
 		bridge();
 		// A synthetic future sibling exercises the caller's section-preserving

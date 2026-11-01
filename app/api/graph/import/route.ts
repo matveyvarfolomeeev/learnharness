@@ -119,6 +119,7 @@ export async function POST(request: Request) {
 			? "Import request is too large. Select fewer files."
 			: "Could not read the upload. It may be incomplete; please select the files again." }, { status: oversized ? 413 : 400 });
 	}
+	const projectId = typeof form.get("projectId") === "string" ? form.get("projectId") as string : undefined;
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.reduce((total, file) => total + file.size, 0) > MAX_IMPORT_BYTES) {
 		return Response.json({ results: [] as ImportResult[], error: "Too big. Max 25 MB." }, { status: 413 });
@@ -151,7 +152,7 @@ export async function POST(request: Request) {
 					continue;
 				}
 				sourceDirectory.registerImport(filePath);
-				const stats = await extraction.importNotes({ filePath, text: notes.text });
+				const stats = await extraction.importNotes({ filePath, text: notes.text, ...(projectId ? { projectId } : {}) });
 				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {

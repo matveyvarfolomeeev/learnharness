@@ -1491,13 +1491,18 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		}
 	});
 
-	it("preserves the complete teaching-session prompt byte-for-byte", () => {
-		// Original UTF-8 snapshot, including every newline, preamble and the
-		// session-only anchor rule. Notes-only changes must not alter it.
+	it("preserves the personalized teaching-session prompt byte-for-byte", () => {
+		// Includes the reusable-knowledge and project rules shared with notes,
+		// plus the session-only anchor rule. Notes framing must not alter it.
 		assert.equal(
 			createHash("sha256").update(EXTRACTOR_INSTRUCTIONS, "utf8").digest("hex"),
-			"a8bddd7d47130ed5e39ffe7d8d0ed6efdd6b30407d52cd9838e7be2e465089a6",
+			"11ab19176b3cc5a5cf795f4c09eb4366b1a9a32ae4a6d635f90633d2c4ea789c",
 		);
+		for (const prompt of [EXTRACTOR_INSTRUCTIONS, NOTES_EXTRACTOR_INSTRUCTIONS]) {
+			assert.match(prompt, /Use concise established Russian textbook names/);
+			assert.match(prompt, /Reading or discussing material does not establish that the learner has mastered it/);
+			assert.match(prompt, /PROJECT KNOWLEDGE may include ideas from OTHER sessions/);
+		}
 	});
 
 	it("the notes framing records knowledge without requiring a foundational reconstruction", () => {

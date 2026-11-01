@@ -20,6 +20,10 @@ import {
 } from "../src/server/settings-body.ts";
 
 describe("parseGeneralSettingsBody", () => {
+	it("accepts notification opt-in/out without accepting strings", () => {
+		for (const enabled of [true, false]) assert.deepEqual(parseGeneralSettingsBody({ answerNotifications: enabled }), { ok: true, settings: { answerNotifications: enabled } });
+		assert.equal(parseGeneralSettingsBody({ answerNotifications: "true" }).ok, false);
+	});
 	it("parses {} and {autoUpdate} replace-whole", () => {
 		const empty = parseGeneralSettingsBody({});
 		assert.ok(empty.ok);
@@ -32,6 +36,10 @@ describe("parseGeneralSettingsBody", () => {
 	it("rejects non-objects and non-boolean autoUpdate", () => {
 		assert.equal(parseGeneralSettingsBody("x").ok, false);
 		assert.equal(parseGeneralSettingsBody({ autoUpdate: "yes" }).ok, false);
+	});
+	it("accepts explicit Fast opt-in and opt-out, rejecting non-booleans", () => {
+		for (const enabled of [true, false]) assert.deepEqual(parseGeneralSettingsBody({ chatGPTFastMode: enabled }), { ok: true, settings: { chatGPTFastMode: enabled } });
+		assert.equal(parseGeneralSettingsBody({ chatGPTFastMode: "true" }).ok, false);
 	});
 });
 

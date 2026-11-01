@@ -76,6 +76,23 @@ const depsOf = (chatId: string, thresholdTokens: number): CompactionDeps => ({
 // ── the laws ────────────────────────────────────────────────────────────────
 
 describe("the compaction service", () => {
+	it("background compaction releases its input gate before notifying the desktop", async () => {
+		const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected"), marker = process.env.LH_DESKTOP_SERVER;
+		const chatId = overThresholdChat("compact: desktop attention"), packets: unknown[] = [];
+		try {
+			process.env.LH_DESKTOP_SERVER = "1";
+			Object.defineProperty(process, "connected", { configurable: true, value: true });
+			Object.defineProperty(process, "send", { configurable: true, value: (packet: unknown) => { assert.equal(compactionInFlight(chatId), false); packets.push(packet); } });
+			kickCompaction(() => depsOf(chatId, 40_000), chatId);
+			assert.equal(compactionInFlight(chatId), true);
+			await awaitCompaction(chatId);
+			assert.deepEqual(packets, [{ channel: "lh:attention", chatId }]);
+		} finally {
+			if (send) Object.defineProperty(process, "send", send); else delete process.send;
+			if (connected) Object.defineProperty(process, "connected", connected); else delete (process as { connected?: boolean }).connected;
+			if (marker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = marker;
+		}
+	});
 	it("background eligibility skips both entrypoints without writes, but still awaits an existing structural run", async () => {
 		const chatId = overThresholdChat("compact: consent off");
 		const before = summarizeCalls;

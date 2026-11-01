@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
-import { piModels, piEngineForSpec } from "../src/agent/models.ts";
+import { configureProviderSource, piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
 import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
 
@@ -20,6 +20,7 @@ let requests: { authorization: string | null; body: Record<string, any>; url: st
 let responseEvents: unknown[] = [];
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
+const fastModel = piModels().getModel("openai", "gpt-6.1-sol") as Model<"openai-responses">;
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
@@ -29,12 +30,12 @@ before(async () => {
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
 			ipc({ channel: "lh:chatgpt", id: message.id, op: message.op,
-				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
+				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: fastModel.id, name: "Scratch Fast model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
 			});
 		});
 		callback?.(); return true;
 	} });
-	await refreshChatGPTModels([model]);
+	await refreshChatGPTModels([model, fastModel]);
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
@@ -54,7 +55,7 @@ const complete = (output: unknown[] = []) => ({ type: "response.completed", resp
 const context = () => normalizeContext({ systemPrompt: "Scratch teacher instructions", messages: [{ role: "user", content: [{ type: "text", text: "Scratch learning material" }, { type: "image", data: "c2NyYXRjaA==", mimeType: "image/png" }], timestamp: 1 }], tools: [{ name: "scratch_tool", description: "Scratch local tool", parameters: Type.Object({ value: Type.String() }) }] });
 
 test("catalog intersects supported capabilities, without inventing model limits", () => {
-	assert.equal(chatGPTModels().length, 1);
+	assert.equal(chatGPTModels().length, 2);
 	assert.equal(chatGPTModels()[0]!.provider, "chatgpt");
 	assert.equal(chatGPTModels()[0]!.contextWindow, model.contextWindow);
 	assert.deepEqual(chatGPTModels()[0]!.input, model.input);
@@ -100,6 +101,26 @@ test("mixed history never blanket-relabels API providers or reuses foreign reaso
 	assert.deepEqual((transformed.messages[0] as AssistantMessage).content, []);
 	assert.equal((transformed.messages[1] as AssistantMessage).content[0]!.type, "thinking");
 	assert.equal(native.content.length, 1, "source history must not be mutated");
+});
+
+test("Fast follows the live preference only for foreground turns and preserves xhigh", async () => {
+	let enabled = false, background = false;
+	configureProviderSource({ sync() {}, isCustom: () => false, chatGPTFastMode: () => enabled });
+	const engine = piEngineForSpec({ provider: "chatgpt", id: fastModel.id, thinkingLevel: "xhigh" }, () => background);
+	responseEvents = [complete()];
+	try {
+		for (const [fast, bg, expected] of [[false, false, undefined], [true, false, "priority"], [true, true, undefined], [false, false, undefined]] as const) {
+			enabled = fast; background = bg; requests = [];
+			const result = await engine.streamFn(engine.model, context()).result();
+			assert.equal(result.stopReason, "stop");
+			assert.equal(requests.length, 1);
+			assert.equal(requests[0]!.body.service_tier, expected);
+			assert.equal(requests[0]!.body.reasoning.effort, "xhigh");
+			assert.equal(requests[0]!.authorization, "Bearer scratch-oauth-only");
+		}
+		assert.equal(chatGPTPayload({ input: [], service_tier: "priority" }, fastModel.id).service_tier, undefined, "caller cannot bypass the opt-in");
+		assert.equal(chatGPTPayload({ input: [] }, "unsupported-model", true).service_tier, undefined);
+	} finally { enabled = false; }
 });
 
 test("no terminal completed is never success; late quota/incomplete streams are actionable/redacted", async () => {

@@ -54,8 +54,21 @@ Runtime contract (the document runs in a sandboxed iframe, sandbox="allow-script
 - Single file. Vanilla JS + Canvas 2D or SVG. CDN imports (e.g. a plotting or math library) are allowed
   when they genuinely help — but prefer dependency-free; you own the failure if a CDN import fails.
 - NO localStorage, sessionStorage, or document.cookie — the sandbox makes them throw.
-- The parent sizes the iframe to the document height automatically; just build normal flowing layout.
-  Make the demo fill the width and size its own height sensibly.
+- The app shows the demo in a resizable side panel or a large viewer. Build for 480x640 AND 1100x720 viewports.
+- Required presentation structure: one main root containing exactly one direct child with data-lh-demo-stage,
+  followed by one or more direct-child sections with data-lh-demo-step="Short descriptive step title".
+  Put the title, visualization and ALL primary controls in the stage. Put explanations in the step sections.
+  Do not put other visible content outside this structure. The host supplies step navigation and switches
+  between one step and all explanations without recreating any elements. Do not build duplicate navigation.
+- The stage gets about 55% of the height in a narrow panel, and the left 56% in a wide viewer. It MUST fit
+  without scrolling: use responsive SVG/canvas, concise labels and compact controls; no fixed large canvas.
+  The explanation area scrolls independently. Keep each step concise; put long derivations in closed
+  <details><summary>Подробнее</summary>...</details>. Usually 2-6 steps, one clear idea per step.
+- If the picture needs to change with the explanation, listen for window's 'lh-demo-step' CustomEvent:
+  detail is {index, name, steps}. Preserve the learner's slider/input values when changing steps or size.
+  Resize the visualization on ResizeObserver/window resize. Avoid automatic animations while offscreen.
+- The saved/downloaded HTML must also work by itself: all explanation sections are visible without the
+  host bridge. Do not hide them in your CSS/JS or depend on host APIs to initialize the instrument.
 
 Build quality:
 - The demo must directly serve the brief: every control named in the brief must exist and do the thing.
@@ -129,7 +142,7 @@ export function createDemoBuilderTools(
 				if (reason) return `HEADLESS UNAVAILABLE: ${reason}`;
 				let result: DemoRunResult;
 				try {
-					result = await headless.runDemo(state.html, probe ? { probe } : undefined);
+					result = await headless.runDemo(state.html, { presentation: true, ...(probe ? { probe } : {}) });
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					onActivity?.("run_demo: browser error");
@@ -237,7 +250,7 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 		opts.onActivity?.("final verification");
 		let verify: DemoRunResult;
 		try {
-			verify = await headless.runDemo(state.html);
+			verify = await headless.runDemo(state.html, { presentation: true });
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { title, html: "", tested: true, notes: `FAILED: final verification crashed — ${msg}` };

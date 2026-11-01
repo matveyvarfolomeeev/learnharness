@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import { deepgramListenUrl, dictationWav, MAX_DICTATION_PCM_BYTES, GROQ_DICTATION_KEYLESS, type DictationLanguage, type DictationSettings } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 export { isDictationActive } from "@/components/dictation-state";
@@ -282,7 +282,7 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
-	const { getLanguage } = useDictationLanguage();
+	const { getSettings } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
@@ -317,6 +317,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** The deferred transcript (owner round 2): finals land here during the
 	 *  run and flush into the primary input once, at teardown. */
 	const bufferRef = useRef<string[]>([]);
+	const settingsRef = useRef<Required<DictationSettings> | null>(null);
+	const audioRef = useRef<(ArrayBuffer | Int16Array)[]>([]);
+	const audioBytes = useRef(0);
+	const uploadRef = useRef<AbortController | null>(null);
+	const tailFlushed = useRef<(() => void) | null>(null);
+	const stoppingRef = useRef(false);
+	const stopRef = useRef<() => void>(() => {});
 	/** Resolvers waiting for the run to fully end (finish(), owner
 	 *  2026-10-01): released by cleanup() — every terminal path runs it. */
 	const waitersRef = useRef<Array<() => void>>([]);
@@ -334,6 +341,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
 	const cleanup = useCallback((warmNext = true) => {
 		genRef.current++;
+		uploadRef.current?.abort();
+		uploadRef.current = null;
+		tailFlushed.current?.();
+		tailFlushed.current = null;
+		audioRef.current = []; audioBytes.current = 0; stoppingRef.current = false;
 		setDictationActive(false);
 		flush(); // the deferred transcript appears when the run ends (owner round 2)
 		if (safetyRef.current) {
@@ -362,7 +374,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		for (const w of waitersRef.current.splice(0)) w();
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
 		// page just doesn't warm.
-		if (warmNext) warmTokens.refresh();
+		if (warmNext && settingsRef.current?.engine === "deepgram") warmTokens.refresh();
 	}, []);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
@@ -437,10 +449,19 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		audioRef.current = []; audioBytes.current = 0; stoppingRef.current = false;
 		const gen = ++genRef.current;
-		let language: DictationLanguage;
+		settingsRef.current = null;
+		let settings: Required<DictationSettings>;
 		try {
-			language = await getLanguage();
+			settings = await getSettings();
+			if (gen !== genRef.current) return;
+			settingsRef.current = settings;
+			if (settings.engine !== "deepgram") {
+				const ready = await fetch("/api/stt/transcribe");
+				if (!ready.ok) throw new Error("Не удалось проверить подключение Groq");
+				if (!(await ready.json()).ready) throw new Error(GROQ_DICTATION_KEYLESS);
+			}
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "Dictation language unavailable");
@@ -455,7 +476,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
 		// first use.
-		const tokenPromise = warmTokens.mint();
+		const tokenPromise = settings.engine === "deepgram" ? warmTokens.mint() : Promise.resolve("");
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -479,16 +500,27 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
 			worklet.port.onmessage = (e) => {
-				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
+				if (gen !== genRef.current) return;
+				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer | Int16Array };
+				if (msg.type === "flushed") { tailFlushed.current?.(); tailFlushed.current = null; return; }
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio") {
+					if (settings.engine !== "deepgram") {
+						if (audioBytes.current + msg.buffer!.byteLength > MAX_DICTATION_PCM_BYTES) {
+							setError("Достигнуто 10 минут — запись отправлена на распознавание.");
+							stopRef.current();
+							return;
+						}
+						audioRef.current.push(msg.buffer!); audioBytes.current += msg.buffer!.byteLength;
+						return;
+					}
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
 					// queue, capped; the open handler flushes in order.
 					else {
-						pendingRef.current.push(msg.buffer!);
+						pendingRef.current.push(msg.buffer! as ArrayBuffer);
 						if (pendingRef.current.length > 256) pendingRef.current.shift();
 					}
 				}
@@ -524,12 +556,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (gen !== genRef.current) return;
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage]);
+		if (settings.engine === "deepgram") openSocket(gen, token, settings.language);
+		else setPhase("recording");
+	}, [openSocket, cleanup, getSettings]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
-		if (phase !== "recording" && phase !== "connecting") return;
+		if ((phase !== "recording" && phase !== "connecting") || stoppingRef.current) return;
+		stoppingRef.current = true;
 		setPhase("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
@@ -538,6 +572,36 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
 		sourceRef.current = null;
+		if (settingsRef.current?.engine !== "deepgram" && settingsRef.current) {
+			const settings = settingsRef.current;
+			void (async () => {
+				try {
+					const worklet = workletRef.current;
+					if (worklet) await new Promise<void>((resolve) => {
+						const timeout = setTimeout(() => { tailFlushed.current = null; resolve(); }, 250);
+						tailFlushed.current = () => { clearTimeout(timeout); resolve(); };
+						worklet.port.postMessage({ type: "flush" });
+					});
+					if (gen !== genRef.current) return;
+					worklet?.disconnect(); workletRef.current = null;
+					if (audioBytes.current < 320) { setError("Запись слишком короткая. Повтори фразу."); return; }
+					const body = new FormData();
+					body.set("file", new Blob([dictationWav(audioRef.current)], { type: "audio/wav" }), "dictation.wav");
+					body.set("settings", JSON.stringify(settings));
+					audioRef.current = []; audioBytes.current = 0;
+					const controller = new AbortController(); uploadRef.current = controller;
+					const response = await fetch("/api/stt/transcribe", { method: "POST", body, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(95_000)]) });
+					const result = await response.json();
+					if (gen !== genRef.current) return;
+					if (!response.ok) throw new Error(result.error ?? "Не удалось распознать запись.");
+					if (typeof result.text === "string" && result.text.trim()) bufferRef.current = [result.text];
+					if (typeof result.warning === "string") setError(result.warning);
+				} catch (e) {
+					if (gen === genRef.current) setError(e instanceof Error ? e.message : "Не удалось распознать запись.");
+				} finally { if (gen === genRef.current) cleanup(); }
+			})();
+			return;
+		}
 		workletRef.current?.disconnect();
 		workletRef.current = null;
 
@@ -558,6 +622,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			cleanup();
 		}
 	}, [phase, cleanup]);
+	stopRef.current = stop;
 
 	const cancel = useCallback(() => {
 		if (phase === "idle") return;
@@ -600,14 +665,14 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	// page owns ONE hook instance, and only the mounted page's listener is
 	// attached.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		void getSettings().then((settings) => { if (settings.engine === "deepgram") warmTokens.refresh(); }).catch(() => {});
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
 			bufferRef.current = [];
 			cleanup(false);
 		};
-	}, [cleanup]);
+	}, [cleanup, getSettings]);
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -649,7 +714,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error === DICTATION_KEYLESS;
+	const keyless = error === DICTATION_KEYLESS || error === GROQ_DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -704,7 +769,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					onClick={() => {
 						if (keyless) {
 							clearError();
-							openSettings("keys", DEEPGRAM_KEY_ID);
+							openSettings("keys", error === GROQ_DICTATION_KEYLESS ? "GROQ_API_KEY" : DEEPGRAM_KEY_ID);
 						} else {
 							toggle();
 						}

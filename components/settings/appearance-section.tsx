@@ -41,7 +41,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
-import { CommitInput, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+import { CommitInput, SettingsGroup, SettingsMenuTrigger, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -186,6 +186,17 @@ export function AppearanceSection({
 
 	return (
 		<>
+			<SettingsGroup label="Демонстрации" testid="group-demos">
+				<SettingsRow label="Открывать демки" hint="По кнопке «Открыть» в карточке">
+					<ThinSelect value={resolved.demoView} ariaLabel="Открывать демки" onChange={(value) => onSectionChange({ ...appearance, demoView: value as "side" | "fullscreen" })}>
+						<option value="side">Справа от диалога</option>
+						<option value="fullscreen">На весь экран</option>
+					</ThinSelect>
+				</SettingsRow>
+				<SettingsRow label="Показывать по шагам" hint="Для новых демок. Старые открываются в исходном виде.">
+					<Toggle checked={resolved.demoSteps} label="Показывать по шагам" onChange={(demoSteps) => onSectionChange({ ...appearance, demoSteps })} />
+				</SettingsRow>
+			</SettingsGroup>
 			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
 				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
 					<option value="dark">Dark</option>

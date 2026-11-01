@@ -34,7 +34,7 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { isDictationLanguage, isDictationEngine, MAX_DICTATION_GLOSSARY, type DictationLanguage, type DictationEngine } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -333,11 +333,18 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** Fast service tier for foreground ChatGPT GPT-6.1 Sol turns; default OFF. */
+	chatGPTFastMode?: boolean;
+	/** Native notifications for new questions while the desktop app is unfocused. */
+	answerNotifications?: boolean;
 }
 
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	engine?: DictationEngine;
+	cleanup?: boolean;
+	glossary?: string;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -382,6 +389,8 @@ export interface MdRenderingSettings {
 
 /** Appearance settings — mode, colors, type, markdown emphasis. */
 export interface AppearanceSettings {
+	demoView?: "side" | "fullscreen";
+	demoSteps?: boolean;
 	/** "dark" | "light" (default dark). */
 	mode?: "dark" | "light";
 	/** The one user-chosen color; everything else derives per-mode in code.
@@ -490,6 +499,8 @@ export interface FactorySettings {
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	appearance: {
+		demoView: "side" | "fullscreen";
+		demoSteps: boolean;
 		mode: "dark" | "light";
 		background: string | null;
 		fontFamily: string | null;
@@ -507,9 +518,11 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
-	dictation: { language: "en" },
+	general: { autoUpdate: true, chatGPTFastMode: false, answerNotifications: false },
+	dictation: { language: "en", engine: "deepgram", cleanup: true, glossary: "" },
 	appearance: {
+		demoView: "side",
+		demoSteps: true,
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
 		fontFamily: null, // Source Sans 3
@@ -553,6 +566,10 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	const chatGPTFastMode = boolOrDrop(raw.chatGPTFastMode);
+	if (chatGPTFastMode !== undefined) out.chatGPTFastMode = chatGPTFastMode;
+	const answerNotifications = boolOrDrop(raw.answerNotifications);
+	if (answerNotifications !== undefined) out.answerNotifications = answerNotifications;
 	return out;
 }
 
@@ -736,6 +753,8 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
+	if (raw.demoView === "side" || raw.demoView === "fullscreen") out.demoView = raw.demoView;
+	if (typeof raw.demoSteps === "boolean") out.demoSteps = raw.demoSteps;
 	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
 	if (raw.fontFamily !== undefined) {
@@ -808,10 +827,14 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		out.dictation = {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const d = raw as Record<string, unknown>;
+			if (isDictationLanguage(d.language)) out.dictation.language = d.language;
+			if (isDictationEngine(d.engine)) out.dictation.engine = d.engine;
+			if (typeof d.cleanup === "boolean") out.dictation.cleanup = d.cleanup;
+			if (typeof d.glossary === "string") out.dictation.glossary = d.glossary.trim().slice(0, MAX_DICTATION_GLOSSARY);
+		}
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;

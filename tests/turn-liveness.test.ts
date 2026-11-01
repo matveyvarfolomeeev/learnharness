@@ -38,6 +38,24 @@ describe("turn liveness registry", () => {
 });
 
 describe("turn lifecycle events", () => {
+	it("desktop settlement emits one private attention packet; closing IPC never breaks settlement", () => {
+		const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected"), marker = process.env.LH_DESKTOP_SERVER;
+		const packets: unknown[] = [];
+		try {
+			process.env.LH_DESKTOP_SERVER = "1";
+			Object.defineProperty(process, "connected", { configurable: true, value: true });
+			Object.defineProperty(process, "send", { configurable: true, value: (packet: unknown) => { packets.push(packet); } });
+			beginTurn("chat_attention_unit"); endTurn("chat_attention_unit"); endTurn("chat_attention_unit");
+			assert.deepEqual(packets, [{ channel: "lh:attention", chatId: "chat_attention_unit" }]);
+			Object.defineProperty(process, "send", { configurable: true, value: () => { throw new Error("closed"); } });
+			beginTurn("chat_attention_closed"); assert.doesNotThrow(() => endTurn("chat_attention_closed"));
+			assert.equal(isTurnRunning("chat_attention_closed"), false);
+		} finally {
+			if (send) Object.defineProperty(process, "send", send); else delete process.send;
+			if (connected) Object.defineProperty(process, "connected", connected); else delete (process as { connected?: boolean }).connected;
+			if (marker === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = marker;
+		}
+	});
 	it("beginTurn emits turn-started on success only — the 409 double-begin stays silent", () => {
 		const id = "chat_events_begin";
 		const got: ServerEvent[] = [];

@@ -12,6 +12,11 @@ A background sub-agent hand-authors one SVG, renders it, **looks at the render**
 
 ### The async discipline
 
+Demo layout: the learner opens a compact demo card in a side panel or a large viewer. New demos support
+step-by-step explanations and a continuous reading mode. Specify one shared visualization with its controls,
+then concise named observation/explanation steps in the brief. Keep long proofs in optional details.
+When teaching with a demo, name the relevant step and control so the learner can find them immediately.
+
 Both calls resolve immediately with an ack and your turn continues — the research discipline above (announce what's coming, keep teaching, never wait or poll, never fabricate; failures and aborts arrive as messages). What's specific to artifacts:
 
 1. **A bare tool call with no surrounding text is a failed turn** — set up the concept first ("I'm having an interactive demo built for this — meanwhile, the idea itself…").

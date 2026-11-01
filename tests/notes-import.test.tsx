@@ -58,9 +58,10 @@ it("POST includes captured files and relative identities, preserving provider de
 		const sent = form.getAll("files") as File[];
 		assert.equal(sent.length, 1); assert.equal(await sent[0]!.text(), "two");
 		assert.deepEqual(form.getAll("paths"), [file.webkitRelativePath]);
+		assert.equal(form.get("projectId"), "math");
 		return Response.json({ results: [refused] });
 	};
-	assert.deepEqual(await postNotesImport([file]), [refused]);
+	assert.deepEqual(await postNotesImport([file], "math"), [refused]);
 });
 
 for (const outcome of ["completed", "failed", "partial", "aborted", "busy"] as const) it(`${outcome} preserves escaped raw failure details without result/retry controls`, async () => {

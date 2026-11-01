@@ -13,6 +13,11 @@ import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
 import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
+import { knowledgeAssessmentTool } from "../agent/tools/mastery.ts";
+import { practiceKnowledgeContext } from "../agent/tools/practice-knowledge.ts";
+import { masteryDetails } from "./mastery.ts";
+import { projectDigest } from "../core/projects.ts";
+import { getGraph } from "../core/graph.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
 import {
@@ -119,6 +124,7 @@ const jobRunner = createJobRunner({
  *  (/api/graph/import) hit the same single-flight registry. */
 export const extraction = createExtractionPipeline({
 	...stores,
+	getChunkTokens: () => effectiveSettings().graph.extractionChunkTokens,
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
 	// role override → slot → NOTHING — read FRESH per stage call; an empty
 	// chain flows through as undefined and the pipeline refuses the run
@@ -441,6 +447,10 @@ export async function handleChatInput(
 		restoreAutomatic: (automaticIds, retainedIds) => restoreUncommittedAutomatic(chatId, constructed, automaticIds, retainedIds),
 	});
 	const agentOpts: AgentBuildOptions = {
+		knowledgeTool: graphToolsEnabled(effective) && record.kind !== "practice" ? knowledgeAssessmentTool(chatId, stores.chatStore, stores.graphStore) : undefined,
+		projectContext: graphToolsEnabled(effective) ? record.kind === "practice"
+			? practiceKnowledgeContext({ ...stores, chatId, readMastery: masteryDetails })
+			: projectDigest(getGraph(stores.graphStore), stores.projectStore.read(), chatId, record.title, 12000) : undefined,
 		engine,
 		callPurpose,
 		requestCycle,
@@ -482,7 +492,7 @@ export async function handleChatInput(
 							spawn: (job, input) => void jobRunner.runJob(job.id, input),
 							searchAvailable,
 						},
-						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
+						...(graphToolsEnabled(effective) ? { graph: { ...stores, readMastery: masteryDetails } } : {}),
 					},
 					agentOpts,
 				)
@@ -513,7 +523,7 @@ export async function handleChatInput(
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.
-						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore } : {}),
+						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore, projectStore: stores.projectStore } : {}),
 					},
 					agentOpts,
 				);

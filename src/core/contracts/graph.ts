@@ -124,8 +124,13 @@ export const CURRENT_GRAPH_FORMAT_VERSION = 1;
 
 
 export interface GraphNode {
+	/** Derived view only; manual marks and check evidence are stored separately. */
+	mastery?: import("../mastery.ts").MasterySummary;
 	/** Opaque stable id, store-assigned: "n_" + nanoid-like. */
 	id: string;
+	/** Optional subject source used for presentation and navigation. The
+	 * original provenance remains intact; absent means birth-session grouping. */
+	subjectId?: string;
 	/** A very short label for the node — a compact handle like a glossary
 	 *  headword ("Will to power", "Divine command theory"): what the graph
 	 *  shows at a glance. Presentational only — not unique, not an identity

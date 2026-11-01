@@ -1,4 +1,8 @@
 /**
+ * Local subject organization: an explicit subjectId selects a displayed
+ * subject without changing provenance. Unassigned nodes retain the
+ * original birth-session behavior described below.
+ *
  * BIRTH-SESSION CLUSTERING (wave 7, owner-locked 2026-09-23): embeddings
  * are dead — a proposition's cluster is the SESSION THAT CREATED IT,
  * derived deterministically from provenance. Cluster labels are session
@@ -45,10 +49,12 @@ export interface BirthSessionCluster {
 	members: string[];
 }
 
-/** A node's birth session: its first surviving provenance point's chatId.
- *  null when the node carries no provenance at all (legacy data). */
-export function birthSessionOf(node: Pick<GraphNode, "provenance">): string | null {
-	return node.provenance[0]?.chatId ?? null;
+/** The displayed subject, when explicitly organized, otherwise the first
+ * surviving provenance point. Grouping never changes the original evidence. */
+export function birthSessionOf(node: Pick<GraphNode, "provenance" | "subjectId">): string | null {
+	return typeof node.subjectId === "string" && node.subjectId.length > 0
+		? node.subjectId
+		: node.provenance[0]?.chatId ?? null;
 }
 
 /**

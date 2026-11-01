@@ -593,6 +593,15 @@ body {
 .lh-source-passage {
 	scroll-margin-top: 1rem;
 }
+/* Keep the whole transcript searchable and addressable, while the browser
+   skips layout/paint of offscreen formula trees. Remember measured heights
+   as blocks enter view; printing continues to lay out every block normally. */
+@media screen {
+	[data-session-find-root] .lh-transcript-block {
+		content-visibility: auto;
+		contain-intrinsic-block-size: auto 600px;
+	}
+}
 .lh-source-highlight {
 	background-color: var(--accent);
 	outline: 1px solid var(--border);

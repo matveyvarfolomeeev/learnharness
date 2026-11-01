@@ -39,6 +39,18 @@ it("errors/notices keep selection order across appends even when requests settle
 	assert.deepEqual(queue.getSnapshot().errors, ["A/same.md: first", "B/same.md: second"]);
 	assert.deepEqual(queue.getSnapshot().notices, ["B/c.pdf: Scanner caveat"]);
 });
+it("queued files keep the project selected when appended, even after another selection", async () => {
+	const calls: { projectId?: string; resolve: (rows: NotesImportResult[]) => void }[] = [];
+	const queue = createNotesImportQueue(async (_files, projectId) => new Promise((resolve) => calls.push({ projectId, resolve })));
+	queue.append([file("a.md"), file("b.md"), file("c.md"), file("d.md")], "math");
+	queue.append([file("e.md")], "ml");
+	assert.deepEqual(calls.map((c) => c.projectId), ["math", "math", "math"]);
+	calls[0]!.resolve([success("a.md")]); await tick();
+	calls[1]!.resolve([success("b.md")]); await tick();
+	assert.deepEqual(calls.map((c) => c.projectId), ["math", "math", "math", "math", "ml"]);
+	for (const c of calls.slice(2)) c.resolve([success("done.md")]);
+	await tick(); assert.equal(queue.getSnapshot().importing, false);
+});
 
 it("unsupported-only directories are never sent; picker .DS_Store is ignored and eligible siblings proceed", async () => {
 	const paths: string[] = [];

@@ -314,5 +314,11 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
-	void run.finally(() => state().inFlight.delete(chatId));
+	void run.finally(() => {
+		state().inFlight.delete(chatId);
+		// The question can become answerable only after this background gate clears.
+		if (process.env.LH_DESKTOP_SERVER === "1" && process.connected && process.send) {
+			try { process.send({ channel: "lh:attention", chatId }, () => {}); } catch { /* The shell may already be closing. */ }
+		}
+	});
 }

@@ -1,5 +1,8 @@
 "use client";
 
+import { MasteryControl } from "./mastery";
+import type { MasteryState } from "@/src/core";
+
 /**
  * The home knowledge-graph view (W4; vision §1 "Rendering (DECIDED)").
  *
@@ -925,6 +928,8 @@ export function GraphChromeRow({
 }
 
 export function GraphView({
+	projectId = "",
+	masteryFilter = "all",
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
@@ -935,6 +940,8 @@ export function GraphView({
 	 *  reports the full node list up immediately; the composer-side chip
 	 *  reflects it live. chainSelectOpen still drives the picker mode
 	 *  (Done instead of Delete). */
+	projectId?: string;
+	masteryFilter?: MasteryState | "all";
 	chainSelectOpen?: boolean;
 	practiceSelection?: ReadonlySet<string>;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
@@ -1026,10 +1033,11 @@ export function GraphView({
 		const set = new Set<string>();
 		if (snapshot)
 			for (const node of snapshot.nodes) {
-				if (isNodeVisible(node, query)) set.add(node.id);
+				if (isNodeVisible(node, query) && (masteryFilter === "all" || (!node.id.startsWith("arg_") && (node.mastery?.state ?? "unassessed") === masteryFilter))) set.add(node.id);
 			}
+		if (masteryFilter !== "all") for (const imp of snapshot?.impLinks ?? []) if (set.has(imp.conclusion) && imp.premises.every((p) => set.has(p))) set.add(imp.id);
 		return set;
-	}, [snapshot, query]);
+	}, [snapshot, query, masteryFilter]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1051,7 +1059,7 @@ export function GraphView({
 	}, [chainSelectOpen]);
 	useEffect(() => {
 		let cancelled = false;
-		fetch("/api/graph")
+		fetch(`/api/graph${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`)
 			.then((res) => res.json() as Promise<GraphSnapshot>)
 			.then((data) => {
 				if (!cancelled) setSnapshot(data);
@@ -1060,7 +1068,9 @@ export function GraphView({
 		return () => {
 			cancelled = true;
 		};
-	}, [refreshTick]);
+	}, [refreshTick, projectId]);
+	// Practice changes mastery through saved check results, without running extraction.
+	useServerEvent("turn-settled", () => setRefreshTick((t) => t + 1));
 
 	// Notes import (the format-agnostic front door): file picker → POST
 	// /api/graph/import; the runs surface in the status chips below, and the
@@ -1072,6 +1082,7 @@ export function GraphView({
 	// channel (S5), and the dock rides those announcements thereafter.
 	const refreshActivity = useActivity().refresh;
 	const notesImport = useNotesImport({
+		projectId,
 		onStart: () => {
 			refreshActivity();
 			setTimeout(() => refreshActivity(), 600);
@@ -1419,10 +1430,10 @@ export function GraphView({
 	// Feed #3 — visibility: hidden nodes drop out of rendering, picking,
 	// hover, AND labels; edges drop when either endpoint is hidden.
 	useEffect(() => {
-		rendererRef.current?.setVisible(query.trim() ? visibleIds : null);
+		rendererRef.current?.setVisible(query.trim() || masteryFilter !== "all" ? visibleIds : null);
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
-	}, [visibleIds, query]);
+	}, [visibleIds, query, masteryFilter, isEmpty]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1622,6 +1633,7 @@ export function GraphView({
 				>
 					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
 					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+					{!selected.node.id.startsWith("arg_") && <MasteryControl key={selected.node.id} nodeId={selected.node.id} summary={snapshot?.propositions.find((n) => n.id === selected.node.id)?.mastery} />}
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>

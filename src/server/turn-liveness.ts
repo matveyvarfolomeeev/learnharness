@@ -58,7 +58,14 @@ export function beginTurn(chatId: string): boolean {
  * defensive no-op endTurn must not fire a spurious settle.
  */
 export function endTurn(chatId: string): void {
-	if (inFlight.delete(chatId)) emit("turn-settled", { chatId });
+	if (inFlight.delete(chatId)) {
+		emit("turn-settled", { chatId });
+		// The desktop shell fetches the durable question state through its own API.
+		// No renderer receives this private process channel or its capability.
+		if (process.env.LH_DESKTOP_SERVER === "1" && process.connected && process.send) {
+			try { process.send({ channel: "lh:attention", chatId }, () => {}); } catch { /* Closing the shell must not break turn settlement. */ }
+		}
+	}
 }
 
 /** True while the chat's turn is in flight; lazily evicts stale entries.

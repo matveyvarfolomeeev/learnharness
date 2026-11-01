@@ -27,6 +27,7 @@ import { activeProblemOf } from "../../core/native-messages.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { concludeResult, invalidInputResult, problemResult } from "../tool-execute.ts";
 import { healEncodedArguments, healToolRecord } from "./heal.ts";
+import { practiceKnowledgeTool } from "./practice-knowledge.ts";
 
 
 /** The record-reading context the gates need (the plan-tools idiom). */
@@ -58,13 +59,16 @@ export interface PracticeToolContext {
  *  this closure — the intra-turn truth the record cannot hold yet. */
 export interface PracticeGate {
 	problemActive: boolean;
+	targets?: string[];
 }
 
 /** Seed the turn's gate from the record (result-aware activeProblemOf —
  *  only a cleanly-posed problem counts). */
 export function createPracticeGate(ctx: PracticeToolContext): PracticeGate {
 	const record = ctx.chatStore.getChat(ctx.chatId);
-	return { problemActive: record ? activeProblemOf(record.messages) !== null : false };
+	const active = record ? activeProblemOf(record.messages) : null;
+	const target = (active?.input as { target?: unknown } | undefined)?.target;
+	return { problemActive: active !== null, targets: Array.isArray(target) ? target.filter((id): id is string => typeof id === "string") : [] };
 }
 
 // ─── problem: the pose ───────────────────────────────────────────────────────
@@ -81,10 +85,12 @@ export const problemInputObject = Type.Object({
 	target: Type.Optional(
 		Type.Array(Type.String(), {
 			minItems: 1,
+			maxItems: 12,
 			description:
 				"The proposition id(s) this problem exercises, from the session context's [id] list — include when " +
 				"the material is in the map; OMIT entirely when it is not (a topic session poses untagged problems). " +
-				"Names are normalized to ids at the seam; an unknown proposition is rejected.",
+				"Use practice_knowledge to resolve relevant existing ids when needed. Include only knowledge actually tested, " +
+				"not every prerequisite or a whole project. Names are normalized to ids at the seam; an unknown proposition is rejected.",
 		}),
 	),
 	modelSolution: Type.String({
@@ -155,6 +161,7 @@ export function problemTool(
 				}
 			}
 			gate.problemActive = true;
+			gate.targets = [...new Set(input.target ?? [])];
 			return problemResult();
 		},
 	};
@@ -163,6 +170,11 @@ export function problemTool(
 // ─── conclude: the end of a problem ──────────────────────────────────────────
 
 export const concludeInputObject = Type.Object({
+	knowledgeResults: Type.Optional(Type.Array(Type.Object({
+		nodeId: Type.String({ description: "An exact id from this active problem's committed target list." }),
+		result: Type.Union([Type.Literal("passed"), Type.Literal("partial"), Type.Literal("failed"), Type.Literal("unassessed")]),
+		reason: Type.String({ minLength: 1, maxLength: 1000, description: "What this node's own answer/step demonstrated. passed = independent success, partial = hints/incomplete, failed = a demonstrated error, unassessed = not reached/observed. Brief Russian explanation." }),
+	}), { maxItems: 12, description: "Per-node evidence. Required for multiple targets; cover every target once. Do not apply one step's error/hints to all nodes. For unobserved steps use unassessed. Nothing is graded for movedOn/dismissed." })),
 	outcome: Type.Union(
 		[
 			Type.Literal("solved"),
@@ -209,11 +221,20 @@ export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInput
 		parameters: concludeInputObject,
 		prepareArguments: (args: unknown) => healEncodedArguments(args, concludeInputObject) as never,
 		executionMode: "sequential",
-		execute: async (_toolCallId, _input) => {
+		execute: async (_toolCallId, input) => {
 			if (!gate.problemActive) {
 				return invalidInputResult("conclude", ["no active problem to conclude — pose one first"]);
 			}
+			const targets = gate.targets ?? [];
+			const graded = ["solved", "solvedWithHints", "surrendered"].includes(input.outcome);
+			if (graded && targets.length > 1 && !input.knowledgeResults) return invalidInputResult("conclude", ["For a multi-target problem, provide knowledgeResults for each target separately; use unassessed for unobserved steps."]);
+			if (input.knowledgeResults) {
+				const ids = input.knowledgeResults.map((r) => r.nodeId);
+				if (new Set(ids).size !== ids.length || ids.some((id) => !targets.includes(id)) || (graded && targets.some((id) => !ids.includes(id)))) return invalidInputResult("conclude", ["knowledgeResults must cover each committed target exactly once, with no unrelated node ids."]);
+				if (targets.length === 1 && input.knowledgeResults.some((r) => r.result === "passed") && (input.rung !== null || input.outcome !== "solved")) return invalidInputResult("conclude", ["A single target solved with hints or surrendered cannot be passed; use partial or failed as supported by the answer."]);
+			}
 			gate.problemActive = false;
+			gate.targets = [];
 			return concludeResult();
 		},
 	};
@@ -245,5 +266,6 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),
+		...(ctx.graph ? { practice_knowledge: practiceKnowledgeTool({ ...ctx.graph, chatId: ctx.chatId }) } : {}),
 	});
 }

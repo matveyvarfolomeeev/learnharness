@@ -156,6 +156,7 @@ export function quizInputProblems(input: {
 // args in schema order, so explanation sits immediately BEFORE correctAnswer.
 // (All consumers read by key; the order is authoring guidance, nothing else.)
 export const quizInputBase = Type.Object({
+	knowledgeIds: Type.Optional(Type.Array(Type.String(), { maxItems: 12, description: "Existing n_ knowledge graph ids actually tested by this question. Use ids from project context or graph tools, not plan ids. Omit if not yet in the graph. Reading/prediction is not mastery evidence." })),
 	question: Type.String({
 		description:
 			"The single quiz question to ask. ONE question per turn: ask, then end your turn — the answer determines the next question.",
@@ -301,6 +302,7 @@ export const quizDisplayInputSchema = Type.Object({
 // not in the system prompt.
 
 export const explainInputBase = Type.Object({
+	knowledgeIds: Type.Optional(Type.Array(Type.String(), { maxItems: 12, description: "Existing n_ knowledge graph ids actually tested by this question. Use ids from project context or graph tools, not plan ids. Omit if not yet in the graph. Reading/prediction is not mastery evidence." })),
 	question: Type.String({
 		description:
 			"The single question to ask. ONE question per turn: ask, then end your turn — the answer determines the next.",

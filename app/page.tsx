@@ -7,7 +7,8 @@ import { resolveSettings, slotsConfigured } from "@/src/core";
 // the record (dynamic routes aren't cached client-side).
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams: Promise<{ project?: string }> }) {
+	const { project } = await searchParams;
 	// First-run gate (model-slots wave): chats cannot start until the user
 	// has picked all three slots — the dock shows the CTA while the raw
 	// record's models section lacks any slot pin.
@@ -17,6 +18,6 @@ export default function HomePage() {
 	// section / absent key → factory default on); re-read per navigation.
 	const rendering = resolveSettings(record ?? null).graph.rendering;
 	return (
-		<Home initialConfigured={slotsConfigured(record?.models)} rendering={rendering} />
+		<Home initialProject={project ?? ""} initialConfigured={slotsConfigured(record?.models)} rendering={rendering} />
 	);
 }

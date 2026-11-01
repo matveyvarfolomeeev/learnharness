@@ -37,6 +37,7 @@ export function installCustomProviderSource(readAuth = customAuthState): void {
 	let fingerprint: string | undefined;
 	configureProviderSource({
 		isCustom: (id) => id === CUSTOM_PROVIDER.id,
+		chatGPTFastMode: () => readSettings()?.general?.chatGPTFastMode === true,
 		sync(models) {
 			const cp = readSettings()?.customProvider;
 			// Validate the durable nonce/URL/mode before resolving ANY credential.

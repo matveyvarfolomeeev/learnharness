@@ -20,7 +20,7 @@ import {
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
 		assert.equal(CURRENT_SETTINGS_VERSION, 1);
-		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true });
+		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true, chatGPTFastMode: false, answerNotifications: false });
 		// wave 7 collapse: the master switch ONLY + the extraction-UX
 		// redesign's chunk budget (2026-09-24); doubled to 8192 with the
 		// digest-aware redesign (2026-09-30), then HALVED BACK to 4096
@@ -53,6 +53,14 @@ describe("isHexColor", () => {
 });
 
 describe("sanitizeUserSettings", () => {
+	it("preserves notification choices and drops malformed values", () => {
+		for (const enabled of [true, false]) assert.equal(sanitizeUserSettings({ version: 1, general: { answerNotifications: enabled } })?.general?.answerNotifications, enabled);
+		assert.equal(sanitizeUserSettings({ version: 1, general: { answerNotifications: "true" } })?.general?.answerNotifications, undefined);
+	});
+	it("preserves a boolean Fast choice and drops malformed values", () => {
+		for (const enabled of [true, false]) assert.equal(sanitizeUserSettings({ version: 1, general: { chatGPTFastMode: enabled } })?.general?.chatGPTFastMode, enabled);
+		assert.equal(sanitizeUserSettings({ version: 1, general: { chatGPTFastMode: "true" } })?.general?.chatGPTFastMode, undefined);
+	});
 	it("round-trips a fully valid record field-for-field", () => {
 		const record = {
 			version: 1,
