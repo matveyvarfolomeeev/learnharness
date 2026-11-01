@@ -1,3 +1,13 @@
+# LearnHarness — форк с проектами и адаптивной практикой
+
+Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.4.1**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
+
+**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/v0.4.1...main)
+
+Готовые установщики этого форка пока не опубликованы — его можно запустить из исходников. Ссылки на `learnharness.ai` и релизы автора ниже ведут к исходному приложению, без наших дополнений. Личные диалоги, граф, профиль и ключи в этот репозиторий не входят.
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lh_banner_dark.png">
