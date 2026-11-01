@@ -134,6 +134,18 @@ it("blank space below the tree clears row highlighting and focus, without toggli
 	const checkbox = active()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!; checkbox.checked = true;
 	await point('[data-testid="source-root-drop"]'); assert.equal(active(), null); assert.equal(focused, undefined); assert.equal(checkbox.checked, true);
 });
+
+it("Space follows a newly focused checkbox instead of the previously highlighted row", async () => {
+	await mount(); await key("ArrowDown"); assert.deepEqual(activeKey(), ["source", "b"]);
+	const oldCheckbox = active()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+	const folder = document.querySelector<HTMLElement>('[data-chain-nav-row=\'["folder","outer"]\']')!;
+	const newCheckbox = folder.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+	let oldClicks = 0, newClicks = 0;
+	oldCheckbox.click = () => { oldClicks++; }; newCheckbox.click = () => { newClicks++; };
+	newCheckbox.focus();
+	assert.equal((await key(" ", newCheckbox)).defaultPrevented, true);
+	assert.equal(oldClicks, 0); assert.equal(newClicks, 1); assert.deepEqual(activeKey(), ["folder", "outer"]);
+});
 it("programmatic focus waits for a just-created row to render, then highlights and scrolls it", async () => {
 	let addRow: () => void;
 	function FocusHarness() {

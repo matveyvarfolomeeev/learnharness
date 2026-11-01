@@ -191,6 +191,7 @@ export function Home({
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
+						onPractice={() => setMode("practice")}
 						onChainSelectClose={() => setChainSelectOpen(false)}
 					/>
 				) : (
@@ -198,6 +199,7 @@ export function Home({
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
+						onPractice={() => setMode("practice")}
 						onChainSelectClose={() => setChainSelectOpen(false)}
 					/>
 				)}

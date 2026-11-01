@@ -933,6 +933,7 @@ export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
+	onPractice,
 	onChainSelectClose,
 }: {
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the LIFTED, persistent
@@ -945,6 +946,7 @@ export function GraphView({
 	chainSelectOpen?: boolean;
 	practiceSelection?: ReadonlySet<string>;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
+	onPractice?: () => void;
 	onChainSelectClose?: () => void;
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1694,6 +1696,7 @@ export function GraphView({
 					onChainSelectClose?.();
 				}}
 				selectMode={chainSelectOpen}
+				onPractice={onPractice}
 				controlledSelection={practiceSelection}
 				onSelectionChange={(ids) => {
 					// Resolve ids → nodes against the live snapshot; the

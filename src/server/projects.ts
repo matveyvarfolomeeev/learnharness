@@ -37,28 +37,30 @@ export function assignProject(sourceId: string, projectId: string) {
 export function updateProjects(body: Record<string, unknown>): { status: number; error?: string; id?: string } {
 	const catalog = stores.projectStore.read();
 	if (body.action === "delete") {
-		if (typeof body.id !== "string" || typeof body.targetId !== "string" || !body.targetId) return { status: 400, error: "Выбери проект для переноса знаний" };
-		if (body.id === UNASSIGNED_PROJECT) return { status: 400, error: "Раздел «Без проекта» нельзя удалить" };
-		if (!catalog.projects.some((p) => p.id === body.id)) return { status: 404, error: "Проект уже удалён или не найден" };
-		if (projectIds(catalog, body.id).has(body.targetId)) return { status: 400, error: "Нельзя перенести проект в себя или свой подраздел" };
+		const ids = body.ids ?? [body.id];
+		if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== "string" || !id) || typeof body.targetId !== "string" || !body.targetId) return { status: 400, error: "Выбери проекты и место для переноса знаний" };
+		const removing = new Set<string>(ids);
+		if (removing.has(UNASSIGNED_PROJECT)) return { status: 400, error: "Раздел «Без проекта» нельзя удалить" };
+		if ([...removing].some((id) => !catalog.projects.some((p) => p.id === id))) return { status: 404, error: "Проект уже удалён или не найден" };
+		if ([...removing].some((id) => projectIds(catalog, id).has(body.targetId as string))) return { status: 400, error: "Нельзя перенести проект в себя или свой подраздел" };
 		if (body.targetId !== UNASSIGNED_PROJECT && !catalog.projects.some((p) => p.id === body.targetId)) return { status: 400, error: "Проект для переноса не найден" };
 		if (extractionStatuses().length) return { status: 409, error: "Дождись завершения экстракции, затем удали проект" };
 		const targetId = body.targetId;
 		const next = structuredClone(catalog);
 		if (targetId === UNASSIGNED_PROJECT && !next.projects.some((p) => p.id === targetId)) next.projects.push({ id: targetId, name: "Без проекта", createdAt: new Date().toISOString() });
-		next.projects = next.projects.filter((p) => p.id !== body.id).map((p) => {
-			if (p.parentId !== body.id) return p;
+		next.projects = next.projects.filter((p) => !removing.has(p.id)).map((p) => {
+			if (!p.parentId || !removing.has(p.parentId)) return p;
 			const child = { ...p }; delete child.parentId;
 			return targetId === UNASSIGNED_PROJECT ? child : { ...child, parentId: targetId };
 		});
-		for (const child of next.projects.filter((p) => catalog.projects.find((prior) => prior.id === p.id)?.parentId === body.id)) {
+		for (const child of next.projects.filter((p) => removing.has(catalog.projects.find((prior) => prior.id === p.id)?.parentId ?? ""))) {
 			const error = validateProject(next, child);
 			if (error) return { status: 400, error: `Не удалось перенести подраздел «${child.name}»: ${error}` };
 		}
-		for (const [sourceId, projectId] of Object.entries(next.assignments)) if (projectId === body.id) next.assignments[sourceId] = targetId;
+		for (const [sourceId, projectId] of Object.entries(next.assignments)) if (removing.has(projectId)) next.assignments[sourceId] = targetId;
 		const lines = stores.graphStore.readNodes();
-		const moving = new Set(getGraph(stores.graphStore).nodes.filter((node) => projectOf(node, catalog) === body.id).map((node) => node.id));
-		const movedLines = lines.map((node) => moving.has(node.id) || node.subjectId === body.id ? { ...node, subjectId: targetId } : node);
+		const moving = new Set(getGraph(stores.graphStore).nodes.filter((node) => removing.has(projectOf(node, catalog))).map((node) => node.id));
+		const movedLines = lines.map((node) => moving.has(node.id) || removing.has(node.subjectId ?? "") ? { ...node, subjectId: targetId } : node);
 		const changed = movedLines.some((node, index) => node !== lines[index]);
 		// Only subjectId changes. Keep every ledger line, ID and provenance point;
 		// chains, mastery, coverage, source records and transcripts stay untouched.

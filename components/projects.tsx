@@ -87,17 +87,49 @@ export function ChatProjectPicker({ chatId }: { chatId: string }) {
 	</div>;
 }
 
+/** Shared confirmation for sidebar deletion and the table's multi-selection. */
+export function DeleteProjectsDialog({ ids, onClose, onDeleted }: { ids: readonly string[]; onClose: () => void; onDeleted: (targetId: string) => void }) {
+	const { data } = useProjects();
+	const [targetId, setTargetId] = useState(UNASSIGNED_PROJECT);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState("");
+	const hidden = new Set(ids.flatMap((id) => data ? [...projectIds(data, id)] : [id]));
+	return <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><Dialog.Portal>
+		<Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60" />
+		<Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[80vh] w-[min(90vw,28rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-5 text-foreground shadow-xl">
+			<Dialog.Title className="pr-8 text-base font-medium">Удалить проекты с переносом знаний</Dialog.Title>
+			<Dialog.Description className="mt-2 text-sm text-muted-foreground">Знания, связи, статусы освоения и диалоги сохранятся. Удалятся только перечисленные проекты.</Dialog.Description>
+			<Dialog.Close aria-label="Закрыть" disabled={busy} className="absolute right-3 top-3 rounded p-2 hover:bg-accent"><XIcon className="size-4" aria-hidden /></Dialog.Close>
+			<form className="mt-5 space-y-4" onSubmit={(event) => {
+				event.preventDefault(); if (busy) return; setBusy(true); setError("");
+				void saveProject({ action: "delete", ids, targetId }).then(() => {
+					onDeleted(targetId);
+					const url = new URL(window.location.href);
+					if (url.pathname === "/" && ids.includes(url.searchParams.get("project") ?? "")) window.location.assign(`/?project=${encodeURIComponent(targetId)}`);
+				}).catch((e) => setError(e.message)).finally(() => setBusy(false));
+			}}>
+				<ul aria-label="Удаляемые проекты" className="max-h-36 list-disc overflow-y-auto pl-5 text-sm">{ids.map((id) => <li key={id}>{data ? projectPath(data, id).map((p) => p.name).join(" / ") || id : id}</li>)}</ul>
+				<label className="block space-y-2 text-sm"><span>Куда перенести знания</span><select autoFocus className={field} value={targetId} disabled={busy} onChange={(e) => setTargetId(e.target.value)}>
+					<option value={UNASSIGNED_PROJECT}>Без проекта</option>{data && options(data).filter((p) => p.id !== UNASSIGNED_PROJECT && !hidden.has(p.id)).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+				</select></label>
+				<p className="text-sm text-muted-foreground">{targetId === UNASSIGNED_PROJECT ? "Не выбранные подпроекты сохранятся и станут самостоятельными." : "Не выбранные подпроекты сохранятся внутри выбранного проекта."}</p>
+				{error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+				<div className="flex flex-wrap justify-end gap-2"><button className={button} type="button" disabled={busy} onClick={onClose}>Отмена</button><button className={`${button} border-destructive/50 text-destructive`} type="submit" disabled={busy || !data || !ids.length || ids.includes(UNASSIGNED_PROJECT)}>{busy ? "Перенос…" : "Перенести и удалить"}</button></div>
+			</form>
+		</Dialog.Content>
+	</Dialog.Portal></Dialog.Root>;
+}
+
 export function ProjectSidebar() {
 	const { data, error: loadError } = useProjects();
 	const [editing, setEditing] = useState<KnowledgeProject | "new" | null>(null);
 	const [name, setName] = useState("");
 	const [parentId, setParentId] = useState("");
 	const [removing, setRemoving] = useState(false);
-	const [targetId, setTargetId] = useState(UNASSIGNED_PROJECT);
 	const [notice, setNotice] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const open = (p: KnowledgeProject | "new") => { setEditing(p); setName(p === "new" ? "" : p.name); setParentId(p === "new" ? "" : p.parentId ?? ""); setRemoving(false); setTargetId(UNASSIGNED_PROJECT); setNotice(""); setError(""); };
+	const open = (p: KnowledgeProject | "new") => { setEditing(p); setName(p === "new" ? "" : p.name); setParentId(p === "new" ? "" : p.parentId ?? ""); setRemoving(false); setNotice(""); setError(""); };
 	const row = (p: KnowledgeProject, depth: number) => <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: Math.min(depth, 5) * 12 }}>
 		<Link href={`/?project=${encodeURIComponent(p.id)}`} title={p.name} className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded px-2 text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
 			<FolderIcon className="size-3 shrink-0" aria-hidden /><span className="truncate">{p.name}</span><span className="ml-auto text-muted-foreground">{data?.counts[p.id] ?? 0}</span>
@@ -111,34 +143,18 @@ export function ProjectSidebar() {
 		<nav aria-label="Дерево проектов" className="max-h-[32vh] overflow-y-auto">{tree(undefined)}</nav>
 		{(loadError || (!editing && error)) && <p role="alert" className="px-2 text-xs text-destructive">{loadError || error}</p>}
 		{notice && <p role="status" className="px-2 text-xs text-muted-foreground">{notice}</p>}
-		<Dialog.Root open={editing !== null} onOpenChange={(v) => { if (!v && !busy) setEditing(null); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60" /><Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[80vh] w-[min(90vw,28rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-5 text-foreground shadow-xl">
-			<Dialog.Title className="pr-8 text-base font-medium">{removing ? "Удалить проект с переносом знаний" : editing === "new" ? "Новый проект" : "Настройки проекта"}</Dialog.Title><Dialog.Description className="mt-2 text-sm text-muted-foreground">{removing ? "Знания, связи, статусы освоения и диалоги сохранятся. Удалится только выбранный проект." : "Проект объединяет знания из разных занятий. Родительский проект включает все свои подразделы."}</Dialog.Description>
+		<Dialog.Root open={editing !== null && !removing} onOpenChange={(v) => { if (!v && !busy) setEditing(null); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-[100] bg-black/60" /><Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[80vh] w-[min(90vw,28rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-5 text-foreground shadow-xl">
+			<Dialog.Title className="pr-8 text-base font-medium">{editing === "new" ? "Новый проект" : "Настройки проекта"}</Dialog.Title><Dialog.Description className="mt-2 text-sm text-muted-foreground">Проект объединяет знания из разных занятий. Родительский проект включает все свои подразделы.</Dialog.Description>
 			<Dialog.Close aria-label="Закрыть" disabled={busy} className="absolute right-3 top-3 rounded p-2 hover:bg-accent"><XIcon className="size-4" aria-hidden /></Dialog.Close>
-			{removing && editing && editing !== "new" ? <form className="mt-5 space-y-4" onSubmit={(event) => {
-				event.preventDefault(); if (busy) return; setBusy(true); setError("");
-				const removed = editing;
-				void saveProject({ action: "delete", id: removed.id, targetId }).then(() => {
-					setEditing(null);
-					setNotice(`Проект «${removed.name}» удалён. Знания перенесены в «${data?.projects.find((p) => p.id === targetId)?.name ?? "Без проекта"}».`);
-					const url = new URL(window.location.href);
-					if (url.pathname === "/" && url.searchParams.get("project") === removed.id) window.location.assign(`/?project=${encodeURIComponent(targetId)}`);
-				}).catch((e) => setError(e.message)).finally(() => setBusy(false));
-			}}>
-				<p className="text-sm">Удаляемый проект: <strong>{editing.name}</strong></p>
-				<label className="block space-y-2 text-sm"><span>Куда перенести знания</span><select autoFocus className={field} value={targetId} disabled={busy} onChange={(e) => setTargetId(e.target.value)}>
-					<option value={UNASSIGNED_PROJECT}>Без проекта</option>{data && options(data, editing.id).filter((p) => p.id !== UNASSIGNED_PROJECT).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-				</select></label>
-				{data?.projects.some((p) => p.parentId === editing.id) && <p className="text-sm text-muted-foreground">{targetId === UNASSIGNED_PROJECT ? "Подпроекты сохранятся и станут самостоятельными." : "Подпроекты сохранятся внутри выбранного проекта."}</p>}
-				{error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-				<div className="flex flex-wrap justify-end gap-2"><button className={button} type="button" disabled={busy} onClick={() => { setRemoving(false); setError(""); }}>Назад</button><button className={`${button} border-destructive/50 text-destructive`} type="submit" disabled={busy || !targetId}>{busy ? "Перенос…" : "Перенести и удалить проект"}</button></div>
-			</form> : <form className="mt-5 space-y-4" onSubmit={(event) => {
+			<form className="mt-5 space-y-4" onSubmit={(event) => {
 				event.preventDefault(); if (busy) return; setBusy(true); setError("");
 				void saveProject({ action: "save", ...(editing && editing !== "new" ? { id: editing.id } : {}), name, parentId }).then(() => setEditing(null)).catch((e) => setError(e.message)).finally(() => setBusy(false));
 			}}><label className="block space-y-2 text-sm"><span>Название</span><input autoFocus required maxLength={100} className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, рекомендательные системы" /></label>
 				<label className="block space-y-2 text-sm"><span>Родительский проект</span><select className={field} value={parentId} onChange={(e) => setParentId(e.target.value)}><option value="">Нет — отдельный предмет</option>{data && options(data, editing && editing !== "new" ? editing.id : undefined).filter((p) => p.id !== UNASSIGNED_PROJECT).map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
 				{error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 				<div className="flex flex-wrap justify-end gap-2">{editing && editing !== "new" && editing.id !== UNASSIGNED_PROJECT && <button type="button" className={`${button} mr-auto text-destructive`} disabled={busy} onClick={() => { setRemoving(true); setError(""); }}>Удалить проект…</button>}<Dialog.Close className={button} disabled={busy}>Отмена</Dialog.Close><button className={`${button} bg-accent`} type="submit" disabled={busy || !name.trim()}>{busy ? "Сохранение…" : "Сохранить"}</button></div>
-			</form>}
+			</form>
 		</Dialog.Content></Dialog.Portal></Dialog.Root>
+		{removing && editing && editing !== "new" && <DeleteProjectsDialog ids={[editing.id]} onClose={() => setRemoving(false)} onDeleted={() => { setRemoving(false); setEditing(null); setNotice("Проект удалён, знания сохранены."); }} />}
 	</section>;
 }

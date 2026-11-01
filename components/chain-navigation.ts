@@ -100,15 +100,17 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 			const fromSearch = target === searchRef.current;
 			if (fromSearch ? event.key !== "ArrowDown" : target?.closest('input:not([type="checkbox"]),textarea,[contenteditable="true"]')) return;
 			if (target?.closest('input[type="checkbox"]') && !target.closest("[data-chain-nav-row]")) return;
+			// Tab or direct focus can move to another row without a pointer event.
+			const currentKey = target?.closest<HTMLElement>("[data-chain-nav-row]")?.dataset.chainNavRow ?? active.current;
 			if (event.key === " ") {
 				if (target?.closest('button,a[href],[role="button"]') && !target.closest("[data-chain-nav-row]")) return;
-				const row = readRows().find((row) => row.key === active.current);
+				const row = readRows().find((row) => row.key === currentKey);
 				const checkbox = row?.element.querySelector<HTMLInputElement>('input[type="checkbox"]');
 				if (!row || !checkbox || checkbox.disabled) return;
 				event.preventDefault(); event.stopPropagation(); checkbox.click(); highlight(row.key, true);
 				return;
 			}
-			const result = navigateChainRows(readRows(), fromSearch ? null : active.current, event.key);
+			const result = navigateChainRows(readRows(), fromSearch ? null : currentKey, event.key);
 			if (!result.key) return;
 			event.preventDefault(); event.stopPropagation();
 			highlight(result.key, true);

@@ -18,7 +18,7 @@ const directory = { organization: { version: 1, folders: [], placements: {} }, s
 let root: Root | undefined, host: HTMLDivElement | undefined;
 const originalFetch = globalThis.fetch;
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; host?.remove(); globalThis.fetch = originalFetch; });
-async function mount(practice = false) {
+async function mount(practice = false, callbacks: { onPractice?: () => void; onSelection?: (ids: ReadonlySet<string>) => void } = {}) {
 	const requests: string[] = [];
 	globalThis.fetch = async (url) => {
 		requests.push(String(url));
@@ -29,7 +29,7 @@ async function mount(practice = false) {
 	function Harness() {
 		const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
 		return <ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><ProjectsProvider>
-			<ChainTableOverlay open nodes={nodes} chains={[]} sessions={{ lesson: "Колок" }} fileSources={{ book: "Конспект" }} selectMode={practice} controlledSelection={selection} onSelectionChange={setSelection} onClose={() => {}} />
+			<ChainTableOverlay open nodes={nodes} chains={[]} sessions={{ lesson: "Колок" }} fileSources={{ book: "Конспект" }} selectMode={practice} controlledSelection={selection} onSelectionChange={(ids) => { setSelection(ids); callbacks.onSelection?.(ids); }} onPractice={callbacks.onPractice} onClose={() => {}} />
 		</ProjectsProvider></ServerEventsProvider>;
 	}
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -69,4 +69,25 @@ it("practice picks survive switching and reflect the same underlying node IDs in
 	assert.equal(checkbox("cluster-checkbox-book").indeterminate, true);
 	assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /1 node/);
 	assert.equal(has("chain-delete"), false);
+});
+
+it("ordinary project selection offers both safe project deletion and practice with the complete project knowledge", async () => {
+	let started = false, picked: string[] = [];
+	const requests = await mount(false, { onPractice: () => { started = true; }, onSelection: (ids) => { picked = [...ids]; } });
+	await click("cluster-checkbox-book");
+	assert.equal(checkbox("cluster-checkbox-book").checked, true);
+	assert.match(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent!, /Проекты: 1 · знания: 2/);
+	assert.equal(document.querySelector('[data-testid="chain-delete"]')!.getAttribute("aria-label"), "Удалить выбранные проекты с переносом знаний");
+	assert.equal(started, false); assert.deepEqual(picked, []);
+	await click("chain-practice-projects");
+	assert.equal(started, true); assert.deepEqual(picked.sort(), ["n_book", "n_lesson"]);
+	assert.deepEqual(requests, ["/api/projects"], "picking must not create a session, call a model or delete a source");
+});
+
+it("ordinary project selection clears explicitly and cannot turn into a same-id source deletion after switching", async () => {
+	await mount(); await click("cluster-checkbox-book"); await click("chain-clear");
+	assert.equal(checkbox("cluster-checkbox-book").checked, false); assert.equal(has("chain-selection-bar"), false);
+	await click("cluster-checkbox-book"); await click("chain-grouping-sources");
+	assert.equal(checkbox("cluster-checkbox-book").checked, false); assert.equal(has("chain-selection-bar"), false);
+	await click("chain-grouping-projects"); assert.equal(checkbox("cluster-checkbox-book").checked, false);
 });

@@ -30,7 +30,8 @@ it("one subject combines notes and teaching sessions and never exposes source de
 	assert.equal((html.match(/data-testid="cluster-group-math"/g) ?? []).length, 1);
 	assert.match(html, /chain-row-derivative/); assert.match(html, /chain-row-series/);
 	assert.doesNotMatch(html, /cluster-group-(?:notes|colloquium)|Колок по матану|Импорт анализа/);
-	assert.doesNotMatch(html, /chain-delete|cluster-checkbox-math|add-source-folder|chain-show-empty/);
+	assert.doesNotMatch(html, /chain-delete|add-source-folder|chain-show-empty/);
+	assert.match(html, /cluster-checkbox-math/);
 	assert.match(html, /data-testid="chain-grouping-projects"[^>]*aria-pressed="true"/);
 });
 

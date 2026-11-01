@@ -18,6 +18,7 @@ const { saveManualMastery } = await import("../src/store/mastery.ts");
 beforeEach(() => { fs.rmSync(root, { recursive: true, force: true }); fs.mkdirSync(root); fs.writeFileSync(process.env.LH_AUTH_FILE!, "{}\n"); });
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 const remove = (id: unknown, targetId: unknown) => PUT(new Request("http://localhost/api/projects", { method: "PUT", body: JSON.stringify({ action: "delete", id, targetId }) }));
+const removeMany = (ids: unknown, targetId: unknown) => PUT(new Request("http://localhost/api/projects", { method: "PUT", body: JSON.stringify({ action: "delete", ids, targetId }) }));
 function node(id: string, subjectId: string | undefined, source: string): GraphNode {
 	return { id, ...(subjectId ? { subjectId } : {}), name: id, statement: `${id} statement`, aliases: [], createdAt: "2026-11-01", provenance: [{ chatId: source, messageId: "m" }] };
 }
@@ -76,6 +77,30 @@ it("the unassigned destination is created and survives a fresh read; subprojects
 	assert.equal(catalog.assignments.book, UNASSIGNED_PROJECT);
 	assert.equal(projectsView().counts[UNASSIGNED_PROJECT], 3, "shared provenance follows its moved source without duplicating the node");
 	assert.equal(getGraph(stores.graphStore).nodes.length, 4);
+});
+
+it("multiple selected projects move together, preserving unselected children and every ledger record", async () => {
+	fixture(); const before = files(), original = stores.graphStore.readNodes();
+	assert.equal((await removeMany(["math", "ml", "math"], UNASSIGNED_PROJECT)).status, 200);
+	const catalog = stores.projectStore.read();
+	assert.deepEqual(catalog.projects.map((p) => p.id).sort(), [UNASSIGNED_PROJECT, "series"].sort());
+	assert.equal(catalog.projects.find((p) => p.id === "series")?.parentId, undefined);
+	assert.deepEqual(stores.graphStore.readNodes(), original.map((n) => n.subjectId === "series" ? n : { ...n, subjectId: UNASSIGNED_PROJECT }));
+	const after = files(); for (const [name, value] of Object.entries(before)) if (!["graph/nodes.jsonl", "graph/projects.json"].includes(name)) assert.equal(after[name], value, name);
+});
+
+it("an explicitly selected parent and child are both removed while the target remains intact", async () => {
+	fixture(); assert.equal((await removeMany(["math", "series"], "ml")).status, 200);
+	assert.deepEqual(stores.projectStore.read().projects.map((p) => p.id), ["ml"]);
+	assert.ok(stores.graphStore.readNodes().every((node) => node.subjectId === "ml"));
+	assert.equal(getGraph(stores.graphStore).nodes.length, 4);
+});
+
+it("invalid batch destinations and mixed valid/missing selections reject the entire operation before writes", async () => {
+	fixture(); const before = files();
+	for (const [ids, target] of [[[], "ml"], [["math", "missing"], "ml"], [["math", 1], "ml"], [["math", UNASSIGNED_PROJECT], "ml"], [["math", "ml"], "ml"], [["math", "ml"], "series"], ["math", "ml"]]) {
+		assert.ok((await removeMany(ids, target)).status >= 400); assert.deepEqual(files(), before);
+	}
 });
 
 it("invalid targets, descendants and the protected unassigned pool refuse before any writes", async () => {

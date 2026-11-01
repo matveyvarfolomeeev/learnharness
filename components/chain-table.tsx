@@ -72,7 +72,7 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel, projectIds, projectOf, projectPath, UNASSIGNED_PROJECT } from "@/src/core";
+import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel, projectIds, projectOf, projectPath, inProjects, UNASSIGNED_PROJECT } from "@/src/core";
 import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection, ProjectCatalog } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
@@ -80,7 +80,7 @@ import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
-import { useProjects } from "./projects";
+import { DeleteProjectsDialog, useProjects } from "./projects";
 import { sessionFindHasForegroundLayer } from "./session-find";
 
 /** The sortable columns (owner ruling: all three — consistency). */
@@ -155,6 +155,10 @@ export function ChainTableBody({
 	onOrganizationChange,
 	selectedFolders = new Set<string>(),
 	selectedSources = new Set<string>(),
+	selectedProjects = new Set<string>(),
+	onToggleProject = () => {},
+	onPracticeProjects,
+	projectKnowledgeCount = 0,
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
@@ -176,6 +180,10 @@ export function ChainTableBody({
 	onOrganizationChange?: OrganizationChange;
 	selectedFolders?: ReadonlySet<string>;
 	selectedSources?: ReadonlySet<string>;
+	selectedProjects?: ReadonlySet<string>;
+	onToggleProject?: (id: string, next: boolean) => void;
+	onPracticeProjects?: () => void;
+	projectKnowledgeCount?: number;
 	onToggleSource?: (id: string, next: boolean) => void;
 	onToggleFolder?: (id: string, next: boolean) => void;
 	nodes: GraphNode[];
@@ -526,14 +534,14 @@ export function ChainTableBody({
 							)}
 							{/* The cluster row: birth-session group header. */}
 							<SourceDragRow {...chainRow([group.kind === "project" ? "project" : "source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={group.kind !== "project" && Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
-								{group.kind !== "project" || selectMode ? <RowCheckbox
-									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
-									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
+								<RowCheckbox
+									disabled={selectMode ? group.nodeIds.length === 0 : group.kind !== "project" && !directory?.sources.some((s) => s.id === group.birth)}
+									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.kind === "project" ? selectedProjects.has(group.key) : group.birth !== null && selectedSources.has(group.birth)}
 									indeterminate={selectMode ? selectedCount > 0 && selectedCount < group.nodeIds.length : false}
-									onToggle={(next) => { if (selectMode) onToggleNodes(group.nodeIds, next); else if (group.birth) onToggleSource(group.birth, next); }}
+									onToggle={(next) => { if (selectMode) onToggleNodes(group.nodeIds, next); else if (group.kind === "project") onToggleProject(group.key, next); else if (group.birth) onToggleSource(group.birth, next); }}
 									testid={`cluster-checkbox-${group.key}`}
-									label={selectMode ? `Select knowledge in ${group.label ?? "unlabeled"}` : `Select source ${group.label ?? "unlabeled"}`}
-								/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
+									label={selectMode ? `Select knowledge in ${group.label ?? "unlabeled"}` : group.kind === "project" ? `Выбрать проект ${group.label}` : `Select source ${group.label ?? "unlabeled"}`}
+								/>
 								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
 								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand ${group.kind === "project" ? "project" : "source"} ${group.label ?? "unlabeled"}`}
 									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
@@ -675,15 +683,15 @@ export function ChainTableBody({
 			{/* The floating selection bar (owner ruling: never shifts layout —
 			    the Google-Photos pattern). Appears only when something is
 			    selected; floats over the table's bottom edge. */}
-			{(selectMode ? selection.size > 0 : grouping === "sources" && (selectedSources.size > 0 || fullySelectedFolders.size > 0)) && (
+			{(selectMode ? selection.size > 0 : grouping === "projects" ? selectedProjects.size > 0 : selectedSources.size > 0 || fullySelectedFolders.size > 0) && (
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center pb-4">
 					<div
 						data-testid="chain-selection-bar"
-						className="pointer-events-auto flex items-center gap-3 rounded-full border bg-card py-2 pl-4 pr-2 shadow-lg"
+						className={`pointer-events-auto mx-2 flex max-w-full flex-wrap items-center justify-center gap-2 border bg-card py-2 pl-4 pr-2 shadow-lg ${grouping === "projects" && !selectMode ? "rounded-2xl" : "rounded-full"}`}
 					>
 						<span data-testid="chain-selected-summary" className="text-xs font-medium">
 							{selectMode ? <>{selection.size} {selection.size === 1 ? "node" : "nodes"} → {derived.length} {derived.length === 1 ? "chain" : "chains"}</>
-								: <>{selectedSources.size} {selectedSources.size === 1 ? "source" : "sources"}{fullySelectedFolders.size > 0 && ` · ${fullySelectedFolders.size} ${fullySelectedFolders.size === 1 ? "folder" : "folders"}`}</>}
+								: grouping === "projects" ? <>Проекты: {selectedProjects.size} · знания: {projectKnowledgeCount}</> : <>{selectedSources.size} {selectedSources.size === 1 ? "source" : "sources"}{fullySelectedFolders.size > 0 && ` · ${fullySelectedFolders.size} ${fullySelectedFolders.size === 1 ? "folder" : "folders"}`}</>}
 						</span>
 						<button
 							type="button"
@@ -706,6 +714,8 @@ export function ChainTableBody({
 							</button>
 						) : (
 							<>
+							{grouping === "projects" && <button type="button" data-testid="chain-practice-projects" onClick={onPracticeProjects} disabled={!projectKnowledgeCount}
+								className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-50"><DumbbellIcon aria-hidden="true" className="size-3.5" />Практиковаться</button>}
 							{/* The danger fence (owner ruling): a divider quarantines
 								    the destructive action at the bar's right end — the
 								    safe actions and the kill switch never blend. The
@@ -715,11 +725,13 @@ export function ChainTableBody({
 								type="button"
 								data-testid="chain-delete"
 								onClick={onDelete}
-								aria-label="Delete selected sources and folders"
-								className="flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+								aria-label={grouping === "projects" ? "Удалить выбранные проекты с переносом знаний" : "Delete selected sources and folders"}
+								disabled={grouping === "projects" && selectedProjects.has(UNASSIGNED_PROJECT)}
+								title={grouping === "projects" && selectedProjects.has(UNASSIGNED_PROJECT) ? "Раздел «Без проекта» нельзя удалить" : undefined}
+								className="flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
 							>
 								<Trash2Icon aria-hidden="true" className="size-3.5" />
-								Delete
+								{grouping === "projects" ? "Удалить с переносом" : "Delete"}
 							</button>
 							</>
 						)}
@@ -802,7 +814,9 @@ export function ChainTableOverlay({
 	controlledSelection,
 	onSelectionChange,
 	projectId,
+	onPractice,
 }: {
+	onPractice?: () => void;
 	projectId?: string;
 	open: boolean;
 	nodes: GraphNode[];
@@ -824,7 +838,9 @@ export function ChainTableOverlay({
 	const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedChains, setExpandedChains] = useState<ReadonlySet<string>>(() => new Set());
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
-	const deleteOpen = deletion !== null;
+	const [projectSelection, setProjectSelection] = useState<ReadonlySet<string>>(new Set());
+	const [projectDeletion, setProjectDeletion] = useState<string[] | null>(null);
+	const deleteOpen = deletion !== null || projectDeletion !== null;
 	const [directory, setDirectory] = useState<SourceDirectory>();
 	const [directoryFailure, setDirectoryFailure] = useState("");
 	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
@@ -884,6 +900,9 @@ export function ChainTableOverlay({
 	// Controlled when the caller lifts the selection (the practice pick
 	// set); internal (uncontrolled) otherwise — the delete flow's own.
 	const selection = controlledSelection ?? internalSelection;
+	const selectedProjects = new Set([...projectSelection].filter((id) => id === UNASSIGNED_PROJECT || projects?.projects.some((p) => p.id === id)));
+	const selectedProjectScope = new Set([...selectedProjects].flatMap((id) => projects ? [id, ...projectIds(projects, id)] : [id]));
+	const projectNodeIds = projects ? nodes.filter((node) => inProjects(node, selectedProjectScope, projects)).map((node) => node.id) : [];
 	const applySelection = (next: ReadonlySet<string>) => {
 		if (onSelectionChange) onSelectionChange(next);
 		else setInternalSelection(next);
@@ -937,7 +956,7 @@ export function ChainTableOverlay({
 				{(grouping === "sources" ? directoryFailure : projectsError) && <p role="alert" className="px-3 py-1 text-xs text-red-400">{grouping === "sources" ? directoryFailure : projectsError}</p>}
 				<ChainTableBody
 					grouping={grouping}
-					onGroupingChange={(value) => { setGrouping(value); setEntrySelection({ sources: new Set(), folders: new Set() }); }}
+					onGroupingChange={(value) => { setGrouping(value); setEntrySelection({ sources: new Set(), folders: new Set() }); setProjectSelection(new Set()); }}
 					projects={projects ?? undefined}
 					projectId={projectId}
 					keyboardActive={!deleteOpen}
@@ -947,6 +966,10 @@ export function ChainTableOverlay({
 					onOrganizationChange={directory ? changeOrganization : undefined}
 					selectedFolders={selectedFolders}
 					selectedSources={selectedSources}
+					selectedProjects={selectedProjects}
+					onToggleProject={(id, next) => setProjectSelection((previous) => { const ids = new Set(previous); if (next) ids.add(id); else ids.delete(id); return ids; })}
+					projectKnowledgeCount={projectNodeIds.length}
+					onPracticeProjects={() => { applySelection(new Set(projectNodeIds)); onPractice?.(); onClose(); }}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
 					nodes={nodes}
@@ -969,8 +992,8 @@ export function ChainTableOverlay({
 					onToggleCluster={(key) => (grouping === "projects" ? setExpandedProjects : setExpandedClusters)((prev) => toggleIn(prev, key))}
 					onToggleChain={(id) => setExpandedChains((prev) => toggleIn(prev, id))}
 					onToggleNodes={toggleNodes}
-					onClear={() => { if (selectMode) applySelection(new Set()); else setEntrySelection({ sources: new Set(), folders: new Set() }); }}
-					onDelete={() => setDeletion({
+					onClear={() => { if (selectMode) applySelection(new Set()); else if (grouping === "projects") setProjectSelection(new Set()); else setEntrySelection({ sources: new Set(), folders: new Set() }); }}
+					onDelete={() => grouping === "projects" ? setProjectDeletion([...selectedProjects]) : setDeletion({
 						sources: directory?.sources.filter((s) => selectedSources.has(s.id)) ?? [],
 						folders: directory?.organization.folders.filter((f) => fullySelectedFolders.has(f.id)) ?? [],
 					})}
@@ -979,7 +1002,8 @@ export function ChainTableOverlay({
 					onSelect={onClose}
 				/>
 			</div>
-			{!selectMode && <DeleteSourceDialog open={deleteOpen}
+			{!selectMode && projectDeletion && <DeleteProjectsDialog ids={projectDeletion} onClose={() => setProjectDeletion(null)} onDeleted={() => { setProjectDeletion(null); setProjectSelection(new Set()); }} />}
+			{!selectMode && <DeleteSourceDialog open={deletion !== null}
 				sources={deletion?.sources ?? []}
 				folders={deletion?.folders ?? []}
 				onClose={() => setDeletion(null)}

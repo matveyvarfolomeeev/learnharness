@@ -85,6 +85,7 @@ export function MinimalHome({
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
+	onPractice,
 	onChainSelectClose,
 }: {
 	/** The lifted pick set drives the overlay's select mode (Done instead
@@ -93,6 +94,7 @@ export function MinimalHome({
 	chainSelectOpen?: boolean;
 	practiceSelection?: ReadonlySet<string>;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
+	onPractice?: () => void;
 	onChainSelectClose?: () => void;
 }) {
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
@@ -194,6 +196,7 @@ export function MinimalHome({
 					onChainSelectClose?.();
 				}}
 				selectMode={chainSelectOpen}
+				onPractice={onPractice}
 				controlledSelection={practiceSelection}
 				onSelectionChange={(ids) => {
 					// Resolve ids → nodes against the live snapshot; the
