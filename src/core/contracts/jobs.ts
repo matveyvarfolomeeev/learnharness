@@ -34,6 +34,8 @@ export interface JobRecord {
 	updatedAt: string;
 	/** The sub-agent's result (steer-artifact payload). */
 	result?: unknown;
+	/** Demo presentation state, available even before its result reaches the teacher. */
+	ui?: { inverted?: boolean };
 	error?: string;
 	/** Money channel (observability, 2026-09): accumulated token usage of
 	 * the sub-agent's run, written by the runner as steps complete. Cost is
@@ -154,8 +156,10 @@ export function accumulateJobUsage(
  *     sourced briefs) — tracking a live activity line in the job record.
  *     ONE central client poll of GET /api/jobs?chatId=… (in Chat) drives every
  *     job surface: the transcript dispatch cards (live activity by
- *     toolCallId, quiet one-liner after worker completion), the sub-agents sidebar
- *     panel, and the single re-sync when a job settles.
+ *     toolCallId), the sub-agents sidebar panel, and the single re-sync when
+ *     a job settles. Demo cards open the verified job result immediately at
+ *     their dispatch location, independently of teacher delivery; the later
+ *     steer remains in the record but does not render a duplicate card.
  *
  *  3. Dispatch saves input on the job before spawn. On completion the
  *     runner saves result + terminal worker status + pending delivery in
@@ -200,12 +204,15 @@ export interface ResearchResult {
 
 export interface DemoToolInput {
 	title: string;
+	/** Short learner-facing description, separate from the builder's technical brief. */
+	description?: string;
 	/** Precise brief: concept, parameters/interactions, visual style. */
 	brief: string;
 }
 
 export interface DemoResult {
 	title: string;
+	description?: string;
 	/** Self-contained single-file HTML/JS document (sandboxed-iframe ready). */
 	html: string;
 	/** The builder sub-agent headlessly executed the demo before delivery. */

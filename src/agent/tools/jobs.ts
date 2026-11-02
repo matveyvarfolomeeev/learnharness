@@ -42,6 +42,7 @@ export const researchInputSchema = Type.Object({
 
 export const demoInputSchema = Type.Object({
 	title: Type.String({ description: "Short title for the demo card, e.g. 'Damped harmonic oscillator'." }),
+	description: Type.Optional(Type.String({ maxLength: 360, description: "One or two short learner-facing sentences in the lesson's language: what this demo illustrates and what to try. Shown immediately, while it builds. Always include this for new demos." })),
 	brief: Type.String({
 		description:
 			"Precise brief for the builder: the concept, the parameters/controls and what each does, the interactions, and the visual style. " +

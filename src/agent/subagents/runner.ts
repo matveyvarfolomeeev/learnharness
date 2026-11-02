@@ -433,7 +433,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			);
 			if (isDemoFailure(result) && stillRunning(jobId))
 				jobStore.updateJob(jobId, { error: result.notes ?? "demo build failed" });
-			await finishJob(jobId, result);
+			await finishJob(jobId, { ...result, ...(input?.description ? { description: input.description } : {}) });
 		} catch (err) {
 			if (loop.abortSignal.aborted) return;
 			const reason = err instanceof Error ? err.message : String(err);

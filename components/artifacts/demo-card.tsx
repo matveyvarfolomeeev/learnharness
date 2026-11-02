@@ -8,7 +8,10 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
-import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { JobsContext } from "@/components/jobs-context";
+import { DemoDeliveryContext, demoFromJob } from "./demo-delivery";
+import type { ArtifactPartProps, DemoResult, DemoToolInput } from "@/src/core";
+import { isModelsRefusal, isProviderKeyRefusal } from "@/src/core";
 
 /**
  * Completed demos stay as compact launch cards. DemoWorkspace owns the one
@@ -48,12 +51,21 @@ export function reduceDemoBridgeState(state: DemoBridgeState, data: unknown): De
 
 // ─── the demo card ──────────────────────────────────────────────────────────
 
-/** The demo tool-call box: the part's output is the dispatch ack — the box
- * is the DispatchCard (live status via the chat view's jobs feed). The demo
- * itself renders from the steer message via DemoOutputCard. */
+/** The original dispatch owns the card, even before the teacher consumes the result. */
 export function DemoCard({ part }: ArtifactPartProps) {
+	const jobs = useContext(JobsContext), delivery = useContext(DemoDeliveryContext);
+	const job = jobs.find((j) => j.kind === "demo" && j.toolCallId === part.toolCallId);
+	const artifact = delivery.artifacts.get(part.toolCallId) ?? demoFromJob(job);
 	if (part.state !== "output-available") return null;
-	return <DispatchCard toolCallId={part.toolCallId} kind="demo" />;
+	if (isModelsRefusal(job?.error) || isProviderKeyRefusal(job?.error)) return <DispatchCard toolCallId={part.toolCallId} kind="demo" />;
+	const input = part.input as Partial<DemoToolInput> | undefined;
+	if (artifact) return <DemoOutputCard output={artifact.data.result} messageId={artifact.messageId}
+		initialInverted={artifact.data.ui?.inverted ?? false} description={input?.description} />;
+	return <div className="space-y-2" data-testid="demo-pending">
+		{typeof input?.title === "string" && <p className="text-sm font-medium">{input.title}</p>}
+		{typeof input?.description === "string" && <p className="text-sm text-muted-foreground">{input.description}</p>}
+		<DispatchCard toolCallId={part.toolCallId} kind="demo" />
+	</div>;
 }
 
 /** The demo artifact — exported: the steer card renders the delivered
@@ -63,10 +75,12 @@ export function DemoOutputCard({
 	output,
 	messageId,
 	initialInverted = false,
+	description,
 }: {
 	output: unknown;
 	messageId?: string;
 	initialInverted?: boolean;
+	description?: string;
 }) {
 	const result = output as DemoResult | undefined;
 	if (!result || typeof result.html !== "string" || typeof result.title !== "string") {
@@ -89,17 +103,19 @@ export function DemoOutputCard({
 		);
 	}
 	return (
-		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialInverted={initialInverted} />
+		<DemoFrame title={result.title} html={result.html} description={result.description || description || result.notes}
+			messageId={messageId} initialInverted={initialInverted} />
 	);
 }
 
-function DemoFrame({ title, html, messageId, initialInverted = false }: {
-	title: string; html: string; messageId?: string; initialInverted?: boolean;
+function DemoFrame({ title, html, description, messageId, initialInverted = false }: {
+	title: string; html: string; description?: string; messageId?: string; initialInverted?: boolean;
 }) {
 	const actions = useContext(ChatActionsContext), workspace = useDemoWorkspace();
-	const [localInverted, setLocalInverted] = useState(initialInverted);
+	// Until the learner acts, follow persisted state arriving from the jobs feed.
+	const [localInverted, setLocalInverted] = useState<boolean>();
 	const selected = workspace?.selected?.html === html && workspace.selected.messageId === messageId;
-	const inverted = selected ? workspace!.selected!.inverted : localInverted;
+	const inverted = selected ? workspace!.selected!.inverted : localInverted ?? initialInverted;
 	const toggleInverted = (next: boolean) => {
 		setLocalInverted(next);
 		if (selected) { workspace!.setInverted(next); return; }
@@ -109,8 +125,9 @@ function DemoFrame({ title, html, messageId, initialInverted = false }: {
 	};
 	return <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 text-card-foreground" data-testid="demo-card">
 		<div className="min-w-0 flex-1">
-			<span className="block text-[11px] uppercase tracking-wide text-muted-foreground">Interactive demo</span>
+			<span role="status" className="block text-[11px] uppercase tracking-wide text-muted-foreground">Interactive demo · Готова</span>
 			<span className="block truncate text-sm font-medium" title={title}>{title}</span>
+			{description && <p className="mt-1 line-clamp-3 break-words text-sm text-muted-foreground" title={description} data-testid="demo-description">{description}</p>}
 		</div>
 		<Toggle checked={inverted} onChange={toggleInverted} label="Invert demo brightness" title="Invert colors" discIcon={<InvertDiscIcon className="size-3" />} />
 		<button type="button" aria-label="Download demo as HTML" title="Download as HTML" onClick={() => downloadFile(`${slugFilename(title)}.html`, html, "text/html")}

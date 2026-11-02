@@ -1,7 +1,9 @@
 "use client";
 
+import { useContext } from "react";
+import { DemoDeliveryContext } from "./demo-delivery";
 import { CheckIcon, CircleX } from "lucide-react";
-import type { PdfResult, ResearchResult, SubagentArtifactData } from "@/src/core";
+import type { PdfResult, ResearchResult, SubagentArtifactData, SubagentResultMeta } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
@@ -21,11 +23,14 @@ import { VisualOutputCard } from "@/components/artifacts/visual-card";
  *     too long to inline by default and the teacher's wake turn weaves it
  *     into the lesson anyway. Failures keep the failure card (the brief
  *     explains what went wrong).
- *   demo / visual — the artifact itself (sandboxed iframe / sanitized SVG).
- *     The sub-agent's verification notes are model-facing glue and do NOT
- *     render; only a failure note does.
+ *   demo — the result card only when its dispatch is absent from the view;
+ *     otherwise the original dispatch owns the ready card. Old demos use
+ *     builder notes as a description; new ones have a learner-facing description.
+ *   visual — the figure itself. Verification notes stay model-facing.
  */
 export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
+	const delivery = useContext(DemoDeliveryContext);
+	if (delivery.anchoredMessageIds.has(message.id)) return null;
 	const artifactPart = message.parts.find((p) => p.type === "data-subagent-artifact");
 	const data = artifactPart?.data as SubagentArtifactData | undefined;
 	// The abort steer (2026-09 dock semantics): its message-type part is
@@ -55,8 +60,11 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 			) : (
 				<PdfCompleteBadge result={data.result as PdfResult} />
 			);
-		case "demo":
-			return <DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
+		case "demo": {
+			const meta = (message.metadata as { subagentResult?: SubagentResultMeta } | undefined)?.subagentResult;
+			const ui = delivery.artifacts.get(meta?.toolCallId ?? "")?.data.ui ?? data.ui;
+			return <DemoOutputCard output={data.result} messageId={message.id} initialInverted={ui?.inverted ?? false} />;
+		}
 		case "visual":
 			return <VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
 	}

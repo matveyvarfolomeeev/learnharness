@@ -49,6 +49,8 @@ import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobCard, PdfJobCard } from "../components/artifacts/job-card.tsx";
 import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
+import { DemoDeliveryProvider, demoFromJob, indexDemoDelivery } from "../components/artifacts/demo-delivery.tsx";
+import { modelsNotConfigured } from "../src/core/settings.ts";
 import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
 import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
 import { headlessOverride, type DemoRunResult, type HeadlessApi, type RunDemoOptions } from "../src/agent/subagents/headless.ts";
@@ -349,6 +351,69 @@ describe("dispatch card rendering (the tool-call ack box)", () => {
 		);
 		assert.match(html, /PDF reader/);
 		assert.match(html, /finished/);
+	});
+});
+
+describe("demo availability before teacher delivery", () => {
+	const part = { type: "tool-demo", state: "output-available", toolCallId: "early-demo", input: {
+		title: "Bytes and text", brief: "Private builder instructions", description: "Compare reading one byte with reading one character.",
+	}, output: "Dispatched." };
+	const job = { id: "early-job", chatId: "c", kind: "demo", toolCallId: part.toolCallId,
+		status: "done", activity: "finished", createdAt: "2026-11-02T12:00:00Z", updatedAt: "2026-11-02T12:01:00Z",
+		delivery: { kind: "result", status: "pending" },
+		result: { title: "Bytes and text", html: DEMO_HTML, tested: true, description: part.input.description },
+	} as JobRecord;
+	it("opens the verified result from the job while teacher delivery is still pending", () => {
+		const html = renderToStaticMarkup(<JobsContext.Provider value={[job]}><DemoCard part={part as never} /></JobsContext.Provider>);
+		assert.match(html, /data-testid="demo-open"/);
+		assert.match(html, /Compare reading one byte/);
+		assert.ok(!html.includes("<iframe"), "availability never auto-opens a demo");
+	});
+	it("names and describes the demo while it is still building", () => {
+		const html = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status: "running", result: undefined }]}><DemoCard part={part as never} /></JobsContext.Provider>);
+		assert.match(html, /Bytes and text/);
+		assert.match(html, /Compare reading one byte/);
+		assert.ok(!html.includes("Private builder instructions"));
+		assert.ok(!html.includes('data-testid="demo-open"'));
+	});
+	it("keeps one card at its dispatch after delivery, including on reload without jobs", () => {
+		const steer = projectNative([buildSubagentSteer(job, job.result as never)])[0]!;
+		const messages = [{ id: "explanation", role: "assistant" as const, parts: [part] }, steer];
+		for (const jobs of [[], [job]]) {
+			const html = renderToStaticMarkup(<JobsContext.Provider value={jobs}><DemoDeliveryProvider messages={messages} jobs={jobs}>
+				<DemoCard part={part as never} /><p>Next step</p><SubagentSteerCard message={steer} />
+			</DemoDeliveryProvider></JobsContext.Provider>);
+			assert.equal((html.match(/data-testid="demo-card"/g) ?? []).length, 1);
+			assert.ok(html.indexOf('data-testid="demo-open"') < html.indexOf("Next step"));
+		}
+		assert.equal(messages[0]!.parts[0]!.output, "Dispatched.", "display never rewrites the transcript");
+	});
+	it("keeps old/orphan result cards visible when the dispatch is absent", () => {
+		const steer = projectNative([buildSubagentSteer(job, job.result as never)])[0]!;
+		const html = renderToStaticMarkup(<DemoDeliveryProvider messages={[steer]} jobs={[job]}><SubagentSteerCard message={steer} /></DemoDeliveryProvider>);
+		assert.match(html, /data-testid="demo-open"/);
+	});
+	it("preserves early inversion when a stale teacher marker arrives", () => {
+		const steer = projectNative([buildSubagentSteer(job, job.result as never)])[0]!;
+		const before = indexDemoDelivery([], [{ ...job, ui: { inverted: true } }]).artifacts.get(part.toolCallId)!;
+		const after = indexDemoDelivery([steer], [{ ...job, ui: { inverted: true } }]).artifacts.get(part.toolCallId)!;
+		assert.equal(before.messageId, after.messageId);
+		assert.deepEqual(after.data.ui, { inverted: true });
+		assert.equal((before.data.result as { html: string }).html, (after.data.result as { html: string }).html);
+	});
+	it("never exposes unverified, running or aborted job HTML", () => {
+		for (const unsafe of [
+			{ ...job, status: "running" as const },
+			{ ...job, result: { ...(job.result as object), tested: false } },
+			{ ...job, delivery: { kind: "abort" as const, status: "pending" as const } },
+		]) assert.equal(demoFromJob(unsafe), undefined);
+	});
+	it("keeps the provider setup action when a demo job is refused", () => {
+		const refused = { ...job, status: "error" as const, error: modelsNotConfigured([]).error,
+			result: { title: "T", html: "", tested: true, notes: "FAILED: missing model" } };
+		const html = renderToStaticMarkup(<JobsContext.Provider value={[refused]}><DemoCard part={part as never} /></JobsContext.Provider>);
+		assert.match(html, /data-testid="dispatch-refused"/);
+		assert.ok(!html.includes('data-testid="demo-open"'));
 	});
 });
 
@@ -763,7 +828,7 @@ describe("visual maker (fake model + fake headless)", () => {
 
 // ─── 5. job runners + dispatch ───────────────────────────────────────────────
 
-const DEMO_INPUT = { title: "Compound interest", brief: "Slider for rate, curve of growth over 30 years." };
+const DEMO_INPUT = { title: "Compound interest", description: "Change the rate to compare growth over 30 years.", brief: "Slider for rate, curve of growth over 30 years." };
 
 function waitFor(cond: () => boolean, timeoutMs = 5000, what = "condition"): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -844,8 +909,9 @@ describe("demo/visual job runners", () => {
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
 		assert.equal(done.activity, "finished", "the worker finishes independently of delivery");
-		const result = done.result as { title: string; html: string; tested: boolean; notes?: string };
+		const result = done.result as { title: string; html: string; tested: boolean; notes?: string; description?: string };
 		assert.equal(result.title, "Compound interest");
+		assert.equal(result.description, DEMO_INPUT.description, "learner description survives dispatch, build and delivery");
 		assert.equal(result.html, GOOD_HTML);
 		assert.equal(result.tested, true);
 

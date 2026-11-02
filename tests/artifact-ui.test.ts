@@ -27,6 +27,7 @@ let createChat: (title: string, kind?: "practice") => { id: string; title: strin
 let saveMessages: (id: string, messages: unknown[]) => void;
 let getChat: (id: string) => { messages: unknown[] } | undefined;
 let buildSubagentSteerFn: typeof import("../src/core/contracts.ts").buildSubagentSteer;
+let jobStore: typeof import("../src/store/jobs.ts").jobStore;
 
 before(async () => {
 	const route = await import("../app/api/chats/[id]/artifact-ui/route.ts");
@@ -38,6 +39,7 @@ before(async () => {
 	saveMessages = (id, messages) => chatStore.saveMessages(id, messages as never);
 	const contracts = await import("../src/core/contracts.ts");
 	buildSubagentSteerFn = contracts.buildSubagentSteer;
+	jobStore = (await import("../src/store/jobs.ts")).jobStore;
 });
 
 const post = (id: string, body: unknown) =>
@@ -46,6 +48,26 @@ const post = (id: string, body: unknown) =>
 	});
 
 describe("POST /api/chats/:id/artifact-ui", () => {
+	it("persists inversion before teacher delivery without adding messages or waking a turn", async () => {
+		const chat = createChat("Pending demo");
+		const other = createChat("Different chat");
+		const job = jobStore.createJob({ kind: "demo", chatId: chat.id, toolCallId: "pending-demo" });
+		const messageId = `steer_${job.id}`;
+		const body = { input: { messageId, inverted: true } };
+		assert.equal((await post(chat.id, body)).status, 400, "still running");
+		jobStore.updateJob(job.id, { status: "done", result: { title: "T", html: "<p>Tested</p>", tested: true }, delivery: { kind: "result", status: "pending" } });
+		assert.equal((await post(other.id, body)).status, 400, "cannot change another chat's artifact");
+		assert.equal((await post(chat.id, body)).status, 200);
+		assert.deepEqual(jobStore.getJob(job.id)?.ui, { inverted: true });
+		assert.equal(jobStore.getJob(job.id)?.delivery?.status, "pending");
+		assert.deepEqual(getChat(chat.id)!.messages, []);
+		const steer = buildSubagentSteerFn(job, jobStore.getJob(job.id)!.result as never);
+		saveMessages(chat.id, [steer]);
+		assert.equal((await post(chat.id, { input: { messageId, inverted: false } })).status, 200);
+		assert.deepEqual(jobStore.getJob(job.id)?.ui, { inverted: false });
+		const saved = getChat(chat.id)!.messages as [{ details: { ui?: { inverted?: boolean } } }];
+		assert.equal(saved[0].details.ui?.inverted, false);
+	});
 	it("404s an unknown chat", async () => {
 		const res = await post("nope", { input: { messageId: "x", inverted: true } });
 		assert.equal(res.status, 404);
