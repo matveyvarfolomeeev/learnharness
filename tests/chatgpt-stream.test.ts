@@ -8,7 +8,7 @@ import path from "node:path";
 import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
 import { configureProviderSource, piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
-import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
+import { chatGPTHistory, chatGPTPayload, chatGPTStreamError } from "../src/agent/chatgpt-stream.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
@@ -132,6 +132,18 @@ test("no terminal completed is never success; late quota/incomplete streams are 
 		assert(!result.errorMessage?.includes("secret scratch provider diagnostic"));
 		if (JSON.stringify(events).includes("usage_limit")) assert(result.errorMessage?.includes("https://chatgpt.com/settings/usage"));
 	}
+});
+
+test("subscription usage limits survive the chat handler's second error masking", async () => {
+	const error = { code: "subscription_sharing_usage_limit_exceeded", type: "invalid_request_error", message: "The ChatGPT user has reached their Subscription Sharing usage limit. Scratch private provider diagnostic." };
+	responseEvents = [{ type: "error", error }, { type: "response.failed", response: { status: "failed", error, usage: null } }];
+	const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, false);
+	const result = await engine.streamFn(engine.model, context()).result();
+	assert.equal(result.stopReason, "error");
+	assert.match(result.errorMessage!, /ChatGPT plan usage limit reached/);
+	assert.equal(chatGPTStreamError(result.errorMessage!), result.errorMessage);
+	assert.equal(chatGPTStreamError(String(new Error(result.errorMessage))), result.errorMessage);
+	assert(!result.errorMessage!.includes("Scratch private provider diagnostic"));
 });
 
 test("OAuth failure and background denial NEVER use ambient OPENAI_API_KEY", async () => {
