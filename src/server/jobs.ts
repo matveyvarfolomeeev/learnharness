@@ -72,6 +72,7 @@ import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
+import { runningTurn } from "./turn-runs.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
 
 /** Fires one server-side teacher turn: (chatId, input) → HTTP-ish status.
@@ -310,6 +311,8 @@ export interface UserSteerEntry {
 /** The steer route's live hand-off (composer steering, 2026-10-03).
  *  Synchronous by design — no interleaving between the live-agent check
  *  and the queue() means a settling turn can never race the hand-off.
+ *  Learner input also interrupts model generation; background results
+ *  continue to use the ordinary, non-interrupting queue.
  *  Returns false when no turn is live: the caller 409s and the client
  *  falls back to a plain text send (the settle race). The registry copy
  *  is the stranding safety net: if this agent dies undelivered (question
@@ -320,10 +323,12 @@ export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	if (!agent) return false;
 	const entry: UserSteerEntry = { message };
 	const q = state().userSteers.get(chatId) ?? [];
+	if (q.some((queued) => queued.message.id === message.id)) return true;
 	q.push(entry);
 	state().userSteers.set(chatId, q);
 	agent.steer(message);
 	entry.handedTo = agent;
+	runningTurn(chatId)?.interruptForSteer?.(message.id);
 	return true;
 }
 

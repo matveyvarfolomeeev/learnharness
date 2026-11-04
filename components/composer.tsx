@@ -210,6 +210,7 @@ export function Composer({
 					<button
 						type="submit"
 						aria-label={busy && !canSend ? "Stop" : "Send"}
+						title={busy && canSend ? "Уточнить сейчас — продолжить ответ с учётом этого сообщения" : undefined}
 						disabled={!busy && !canSend}
 						className={cn(
 							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",

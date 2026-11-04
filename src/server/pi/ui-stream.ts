@@ -1,6 +1,7 @@
 import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
+import type { LhMessage } from "../../core/native-messages.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -118,6 +119,8 @@ export interface PiTurnHandle {
 	 *  agent.abort(); the loop's agent_end does the rest (the settle seam
 	 *  persists the partial transcript to every listener). */
 	abort(): void;
+	/** Redirect an already-queued learner message without cancelling tools. */
+	interruptForSteer?(messageId: string): void;
 }
 
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
@@ -127,6 +130,23 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	let settled = false;
 	let sawAbort = false;
 	let reportedErrorText: string | undefined;
+	let responsePending = false;
+	let redirectRequested = false;
+	const pendingSteers = new Set<string>();
+	const streamFunction = agent.streamFunction;
+	// Track the request before its first token (reasoning can take minutes).
+	// An ordinary steer during tool execution keeps the native queue semantics.
+	agent.streamFunction = async (...args) => {
+		responsePending = true;
+		// A steer can arrive during asynchronous context preparation, after
+		// the native queue poll. Cancel before sending that stale request.
+		if (pendingSteers.size > 0 && !sawAbort) {
+			redirectRequested = true;
+			agent.abort();
+		}
+		try { return await streamFunction(...args); }
+		catch (error) { responsePending = false; throw error; }
+	};
 
 	// THE PER-TURN STATE LOG (memory-only — the settle-only disk writes
 	// are unchanged). COMPACTION LAW (owner, 2026-10-09, supersedes the
@@ -210,6 +230,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		// Order to the very end: the last pending snapshot precedes [DONE].
 		flushPending();
 		settled = true;
+		agent.streamFunction = streamFunction;
 		for (const sub of subscribers) sub.done();
 		subscribers.clear();
 	};
@@ -252,7 +273,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		send(wire);
 		if (event.type === "message_end") {
 			const m = event.message as { role?: string; stopReason?: string } | undefined;
-			if (m?.role === "assistant" && m.stopReason === "aborted") sawAbort = true;
+			if (m?.role === "assistant" && m.stopReason === "aborted" && !(event.message as LhMessage).interruptedBySteer) sawAbort = true;
 		}
 		if (event.type === "agent_end") {
 			// Persist/report before the terminal closes every view to new frames.
@@ -262,6 +283,22 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	};
 	requestCycle?.bindRelease(handle);
 	agent.subscribe((event) => {
+		if (event.type === "message_end" && event.message.role === "user") {
+			pendingSteers.delete((event.message as LhMessage).id);
+		}
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			responsePending = false;
+			if (redirectRequested && !sawAbort && event.message.stopReason === "aborted") {
+				// Keep visible prose/reasoning, but never expose or replay an
+				// incomplete tool call. This remains an aborted native response.
+				(event.message as LhMessage).interruptedBySteer = true;
+				event.message.content = event.message.content.filter((part) => part.type !== "toolCall");
+				delete event.message.errorMessage;
+			}
+		}
+		// One logical turn can contain several interrupted native runs. Persist
+		// and close SSE only after the final run has actually become idle.
+		if (event.type === "agent_end") return;
 		if (!requestCycle?.hold(event)) handle(event);
 	});
 
@@ -269,15 +306,21 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		try {
 			do {
 				await agent.continue();
-				if (!requestCycle) break;
-				const denied = requestCycle.deniedBeforeDispatch;
-				const outcome = requestCycle.finishNativeCycle();
-				if (denied) agent.state.messages = outcome.messages;
-				if (outcome.action !== "resumeForeground") {
-					handle({ type: "agent_end", messages: [...agent.state.messages] });
-					break;
+				let resumeForeground = false;
+				if (requestCycle) {
+					const denied = requestCycle.deniedBeforeDispatch;
+					const outcome = requestCycle.finishNativeCycle();
+					if (denied) agent.state.messages = outcome.messages;
+					resumeForeground = outcome.action === "resumeForeground";
 				}
-			} while (!sawAbort);
+				// This is a fresh learner request, never an automatic retry of
+				// the aborted provider call. Completed tool results stay in state.
+				const redirect = pendingSteers.size > 0 && agent.hasQueuedMessages();
+				redirectRequested = false;
+				if (!sawAbort && (redirect || resumeForeground)) continue;
+				handle({ type: "agent_end", messages: [...agent.state.messages] });
+				break;
+			} while (true);
 		} catch (err) {
 			// A loop-level failure (not a provider error — those ride the
 			// stream as stopReason "error"): surface, close, persist. If the
@@ -347,8 +390,17 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		abort() {
 			if (settled) return;
 			sawAbort = true;
+			redirectRequested = false;
 			requestCycle?.abort();
 			agent.abort();
+		},
+		interruptForSteer(messageId) {
+			if (settled || sawAbort) return;
+			pendingSteers.add(messageId);
+			if (responsePending) {
+				redirectRequested = true;
+				agent.abort();
+			}
 		},
 	};
 }

@@ -797,7 +797,8 @@ export class SessionModel {
 	 *  transcript card, no status flip: the message joins the queued
 	 *  indicator (the quiet line above the composer) and POSTs to the
 	 *  steer route, which hands it to the live agent's steering queue.
-	 *  When pi drains it at the next response boundary, the verbatim
+	 *  The server interrupts model generation (an executing tool finishes
+	 *  first) and resumes with the queued input. When pi drains it, the verbatim
 	 *  message events upsert the real card (the client-minted id is the
 	 *  key) and the indicator's fold drops the line. A 409 means the turn
 	 *  settled mid-send (the race): fall back to the plain text send —

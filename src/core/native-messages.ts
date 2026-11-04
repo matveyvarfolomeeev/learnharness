@@ -97,6 +97,8 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** Explicit learner interruption: retain visible prose when resuming. */
+	interruptedBySteer?: boolean;
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -639,7 +641,19 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			continue;
 		}
 		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
+		const { id: _id, cliContextWindow: _cliContextWindow, interruptedBySteer, ...native } = m as LhMessage;
+		if (native.role === "assistant" && native.stopReason === "aborted" && interruptedBySteer) {
+			// Pi normally drops aborted responses. The learner has already read
+			// this prose; preserve it as context, without partial reasoning,
+			// signatures or unexecuted tools. The saved record stays aborted.
+			const content = native.content.filter((part) => part.type === "text")
+				.map((part) => ({ type: "text" as const, text: part.text }));
+			if (content.length > 0) {
+				const { errorMessage: _error, ...partial } = native;
+				out.push({ ...partial, content, stopReason: "stop" });
+			}
+			continue;
+		}
 		out.push(native as Message);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
