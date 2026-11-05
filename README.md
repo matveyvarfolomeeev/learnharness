@@ -1,8 +1,8 @@
 # LearnHarness — форк с проектами и адаптивной практикой
 
-Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.4.1**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
+Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.5.0**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
 
-**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/e69e85269c064c6c9c49a8b06ae78c06e79c4a63...main)
+**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/713377f366771e3e4730e6acd1bc290e0ebc6d6e...main)
 
 Готовые установщики этого форка пока не опубликованы — его можно запустить из исходников. Ссылки на `learnharness.ai` и релизы автора ниже ведут к исходному приложению, без наших дополнений. Личные диалоги, граф, профиль и ключи в этот репозиторий не входят.
 
@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://learnharness.ai">Download</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="docs/development.md">Documentation</a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="https://github.com/amosblomqvist/learnharness/issues">Issues</a> ·
   <a href="https://discord.gg/5tCHHQEB2e">Discord</a>
 </p>
@@ -41,7 +41,9 @@ Instead of just giving you an explanation, it uses your answers and thinking to 
 
 **Think out loud.** The thinking fields let you explain your reasoning, uncertainties, and reactions in your own words. This is how the agent gets a detailed picture rather than just a record of right and wrong answers. You can type or use dictation.
 
-The agent can also research questions in the background, create visual explanations, and build interactive demonstrations.
+**Bring your files.** In the desktop app, attach PDFs, photos, or any other file with the paperclip, or drag them in. The file stays where it is: the message carries its path, and the agent reads it from there.
+
+The agent can also research questions in the background, create visual explanations, show your own images in the lesson and mark them up with arrows and labels, and build interactive demonstrations.
 
 ## Knowledge that carries forward
 
@@ -59,13 +61,11 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
 - **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
 
-Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](docs/claude-code.md), or a [custom OpenAI-compatible endpoint](docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys.
+Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](docs/claude-code.md), or a [custom OpenAI-compatible endpoint](docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys. Web research can use a Tavily, Brave, Exa, Firecrawl, or Ollama key in Settings → Providers → Search. Ollama search uses its hosted service, not a local model server.
 
-Advanced users can set a [prompt-cache retention preference](docs/compaction-accounting.md#prompt-cache-retention) for each model slot under **Settings → Agent → Models → Show advanced settings**. Leaving it at **Pi default** preserves existing provider behavior; longer retention can increase cache-write costs.
+See [Getting started](docs/getting-started.md) for model setup, dictation, files, and notes imports, and [context, caching, and costs](docs/compaction-accounting.md) for advanced cache preferences.
 
 All three platforms support in-app updates.
-
-**Dictation:** Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher** ([required for token minting](https://developers.deepgram.com/reference/auth/tokens/grant)) and add it under **Settings → Providers → Dictation**. Choose the language below the key; **Multilingual** supports automatic recognition and mixed-language speech. A `403 Insufficient permissions` error during token minting can indicate an insufficient key role.
 
 ## Your keys, your data
 
@@ -77,12 +77,12 @@ All three platforms support in-app updates.
 ## Development and support
 
 ```bash
-npm install
+npm ci
 npm run dev        # http://localhost:3000
-npm test           # deterministic, no LLM, no network
+npm test           # fixtures and fake providers
 ```
 
-See the [development guide](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the shipped runtime, [keyboard reference](docs/keyboard.md) for shortcuts, and [desktop release guide](docs/desktop-release.md) for packaging and updates.
+See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), and [desktop builds and releases](docs/desktop-release.md).
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 

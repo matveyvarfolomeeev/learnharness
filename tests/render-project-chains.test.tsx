@@ -25,6 +25,23 @@ const base: Parameters<typeof ChainTableBody>[0] = {
 };
 const render = (props: Partial<typeof base> = {}) => renderToStaticMarkup(<ChainTableBody {...base} {...props} />);
 
+it("projects render before source inventory loads and retain arguments born in hidden practice sources", () => {
+	const practiceDirectory: SourceDirectory = { ...directory, sources: [...directory.sources,
+		{ id: "practice", kind: "chat", chatKind: "practice", label: "Practice", createdAt: "2026-11-05" },
+	] };
+	const practiceNode = node("limit", "math", "practice");
+	const props = { nodes: [...nodes, practiceNode], directory: practiceDirectory,
+		chains: [{ id: "practice-argument", premises: ["derivative"], conclusion: "limit", provenance: [], createdAt: "2026-11-05" }],
+	};
+	for (const sourceInventoryPending of [false, true]) {
+		const html = render({ ...props, sourceInventoryPending });
+		assert.match(html, /cluster-group-math/);
+		assert.match(html, /chain-row-practice-argument/);
+	}
+	assert.doesNotMatch(render({ ...props, grouping: "sources", sourceInventoryPending: true }), /cluster-group-/);
+	assert.doesNotMatch(render({ ...props, grouping: "sources", expandedClusters: new Set(["practice"]) }), /cluster-group-practice|chain-row-practice-argument/);
+});
+
 it("one subject combines notes and teaching sessions and never exposes source deletion controls", () => {
 	const html = render({ selectedSources: new Set(["notes"]) });
 	assert.equal((html.match(/data-testid="cluster-group-math"/g) ?? []).length, 1);
