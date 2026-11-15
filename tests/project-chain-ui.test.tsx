@@ -7,6 +7,7 @@ import { parseHTML } from "linkedom";
 import { ChainTableOverlay } from "../components/chain-table.tsx";
 import { ProjectsProvider } from "../components/projects.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
@@ -28,9 +29,9 @@ async function mount(practice = false, callbacks: { onPractice?: () => void; onS
 	};
 	function Harness() {
 		const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
-		return <ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><ProjectsProvider>
+		return <InteractionLayersProvider><ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><ProjectsProvider>
 			<ChainTableOverlay open nodes={nodes} chains={[]} sessions={{ lesson: "Колок" }} fileSources={{ book: "Конспект" }} selectMode={practice} controlledSelection={selection} onSelectionChange={(ids) => { setSelection(ids); callbacks.onSelection?.(ids); }} onPractice={callbacks.onPractice} onClose={() => {}} />
-		</ProjectsProvider></ServerEventsProvider>;
+		</ProjectsProvider></ServerEventsProvider></InteractionLayersProvider>;
 	}
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	await act(async () => root!.render(<Harness />));

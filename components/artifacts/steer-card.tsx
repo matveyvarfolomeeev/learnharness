@@ -4,11 +4,13 @@ import { useContext } from "react";
 import { DemoDeliveryContext } from "./demo-delivery";
 import { CheckIcon, CircleX } from "lucide-react";
 import type { PdfResult, ResearchResult, SubagentArtifactData, SubagentResultMeta } from "@/src/core";
-import type { LhViewMessage } from "@/src/core";
+import type { LhViewMessage, PluginBackgroundResult } from "@/src/core";
 import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
+import { PluginWorkerCard } from "@/components/artifacts/plugin-worker-card";
+import { WorkerResultDetails } from "@/components/artifacts/worker-result-presentation";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -27,6 +29,8 @@ import { VisualOutputCard } from "@/components/artifacts/visual-card";
  *     otherwise the original dispatch owns the ready card. Old demos use
  *     builder notes as a description; new ones have a learner-facing description.
  *   visual — the figure itself. Verification notes stay model-facing.
+ *   plugin — the separate later task outcome, with an optional registered
+ *     tool renderer and a persisted readable fallback (the call keeps its ack).
  */
 export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	const delivery = useContext(DemoDeliveryContext);
@@ -38,8 +42,16 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	// metadata, is the marker) — a quiet chip, mirroring the complete-badge.
 	if (!data) {
 		const aborted = message.parts.find((p) => p.type === "data-subagent-aborted") as
-			| { data?: { kind?: string } }
+			| { data?: { kind?: string; failure?: string } }
 			| undefined;
+		// Recovery/delivery failures share this marker family, but are not
+		// learner aborts and do not invent an outcome for an unreadable task.
+		if (typeof aborted?.data?.failure === "string") return (
+			<div data-testid="job-delivery-failure" role="alert" className="space-y-1 rounded-xl border bg-card p-4 text-sm">
+				<p className="font-medium">Background job recovery/delivery failed</p>
+				<p className="whitespace-pre-wrap break-words text-muted-foreground">{aborted.data.failure}</p>
+			</div>
+		);
 		if (aborted?.data) return <AbortedBadge kind={aborted.data.kind ?? "job"} />;
 		return (
 				<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
@@ -48,6 +60,10 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 		);
 	}
 	switch (data.kind) {
+		case "plugin": {
+			const meta = (message.metadata as { subagentResult?: SubagentResultMeta } | undefined)?.subagentResult;
+			return <PluginWorkerCard result={data.result as PluginBackgroundResult} toolCallId={meta?.toolCallId ?? ""} />;
+		}
 		case "research":
 			return isSubagentFailure("research", data.result as ResearchResult) ? (
 				<ResearchBriefCard output={data.result} />
@@ -92,9 +108,7 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 	// the ?? is runtime tolerance for pre-split persisted steers.
 	const readPages = result.pagesRead ?? result.pagesConsulted;
 	return (
-		<details data-testid="pdf-complete-badge" className="group w-full text-xs text-muted-foreground">
-			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-				<CheckIcon className="size-3.5" />
+		<WorkerResultDetails testId="pdf-complete-badge" heading={<>
 				<span className="font-medium uppercase tracking-wide">PDF</span>
 				<span>reading complete</span>
 				{readPages.length > 0 && (
@@ -102,13 +116,9 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 						· read {readPages.length} page{readPages.length === 1 ? "" : "s"}
 					</span>
 				)}
-				<span className="ml-1 text-xs text-muted-foreground/70 group-open:hidden">view brief</span>
-				<span className="ml-1 hidden text-xs text-muted-foreground/70 group-open:inline">hide brief</span>
-			</summary>
-			<div className="mt-2">
-				<PdfBriefCard output={result} />
-			</div>
-		</details>
+			</>}>
+			<PdfBriefCard output={result} />
+		</WorkerResultDetails>
 	);
 }
 
@@ -119,18 +129,12 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
  * the artifact part in the record is the single source of truth. */
 function ResearchCompleteBadge({ result }: { result: ResearchResult }) {
 	return (
-		<details data-testid="research-complete-badge" className="group w-full text-xs text-muted-foreground">
-			<summary className="flex cursor-pointer select-none list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-				<CheckIcon className="size-3.5" />
+		<WorkerResultDetails testId="research-complete-badge" heading={<>
 				<span className="font-medium uppercase tracking-wide">Research</span>
 				<span>complete</span>
 				{result.sources.length > 0 && <span>· {result.sources.length} sources</span>}
-				<span className="ml-1 text-xs text-muted-foreground/70 group-open:hidden">view brief</span>
-				<span className="ml-1 hidden text-xs text-muted-foreground/70 group-open:inline">hide brief</span>
-			</summary>
-			<div className="mt-2">
-				<ResearchBriefCard output={result} />
-			</div>
-		</details>
+			</>}>
+			<ResearchBriefCard output={result} />
+		</WorkerResultDetails>
 	);
 }

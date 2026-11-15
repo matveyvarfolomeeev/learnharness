@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownLeftIcon, MessageCircleQuestionIcon, SquareIcon, XIcon } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -11,7 +11,10 @@ const ACTION = "rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent f
 
 /** A read-only side conversation. Its state and stream never enter useChatSession,
  * so neither a pending quiz nor the lesson's transcript is replaced. */
-export function SelectionClarification({ chatId, scopeRef }: { chatId: string; scopeRef: RefObject<HTMLDivElement | null> }) {
+export type ClarificationHandle = { begin: (source: SelectedPassage, explain: boolean) => void };
+export function SelectionClarification({ chatId, scopeRef, controlRef }: {
+	chatId: string; scopeRef: RefObject<HTMLDivElement | null>; controlRef?: Ref<ClarificationHandle>;
+}) {
 	const [selection, setSelection] = useState<SelectedPassage | null>(null);
 	const [passage, setPassage] = useState<SelectedPassage | null>(null);
 	const [open, setOpen] = useState(false);
@@ -37,7 +40,7 @@ export function SelectionClarification({ chatId, scopeRef }: { chatId: string; s
 	}, []);
 
 	useEffect(() => {
-		if (open) return;
+		if (open || controlRef) return;
 		let frame = 0;
 		const read = () => {
 			cancelAnimationFrame(frame);
@@ -68,7 +71,7 @@ export function SelectionClarification({ chatId, scopeRef }: { chatId: string; s
 			window.removeEventListener("resize", hide);
 			document.removeEventListener("keydown", onKey, true);
 		};
-	}, [open, scopeRef]);
+	}, [open, scopeRef, controlRef]);
 
 	useEffect(() => {
 		if (!open) { dialog.current?.close(); return; }
@@ -159,6 +162,7 @@ export function SelectionClarification({ chatId, scopeRef }: { chatId: string; s
 		}
 	};
 
+	useImperativeHandle(controlRef, () => ({ begin }));
 	return <>
 		{passage && <button ref={resume} type="button" className={`${ACTION} lh-no-drag flex shrink-0 items-center gap-1.5 text-muted-foreground`} onClick={() => { setOpen(true); setSelection(null); }} aria-label="Вернуться к уточнению">
 			<MessageCircleQuestionIcon className="size-4" aria-hidden /> Уточнение

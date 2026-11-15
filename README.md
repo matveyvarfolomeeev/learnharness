@@ -1,8 +1,8 @@
 # LearnHarness — форк с проектами и адаптивной практикой
 
-Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.5.0**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
+Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.6.1**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
 
-**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/713377f366771e3e4730e6acd1bc290e0ebc6d6e...main)
+**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/cb25c8e49b85eed9e78315584731cad73a0118a6...main)
 
 Готовые установщики этого форка пока не опубликованы — его можно запустить из исходников. Ссылки на `learnharness.ai` и релизы автора ниже ведут к исходному приложению, без наших дополнений. Личные диалоги, граф, профиль и ключи в этот репозиторий не входят.
 
@@ -78,13 +78,18 @@ All three platforms support in-app updates.
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run dev        # http://localhost:3000
 npm test           # fixtures and fake providers
 ```
 
-See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), and [desktop builds and releases](docs/desktop-release.md).
+See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), [themes](docs/themes.md) for the theme file format, and [desktop builds and releases](docs/desktop-release.md).
+
+For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
+
+Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 

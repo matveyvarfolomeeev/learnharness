@@ -2,7 +2,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
-import { useDictation, type Dictation } from "../components/dictation.tsx";
+import { finishDictation, useDictation, useDictationTarget, type Dictation } from "../components/dictation.tsx";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { useDictationLanguage } from "../components/dictation-preference.ts";
 import { isDictationActive, useDictationActive } from "../components/dictation-state.ts";
@@ -70,6 +70,7 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		ready: true,
 		posts: [] as RequestInit[],
 		nextTranscription: undefined as Promise<Response> | undefined,
+		claimed: undefined as ((text: string) => void) | undefined,
 	};
 	Socket.all = [];
 	Worklet.all = [];
@@ -115,6 +116,8 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 	let latest!: Dictation;
 	let setting!: ReturnType<typeof useDictationLanguage>;
 	function Harness() {
+		const claimed = state.claimed;
+		useDictationTarget(React.useCallback((text: string) => claimed?.(text), [claimed]), !!claimed);
 		latest = useDictation({ append: (text) => state.appends.push(text) });
 		setting = useDictationLanguage();
 		state.active = useDictationActive();
@@ -186,6 +189,23 @@ test("Whisper cancellation aborts upload and ignores even a late successful resp
 	assert.equal(f.dictation.phase, "idle");
 });
 
+test("Whisper delivers a side transcript to its fixed destination without submitting the main answer", async () => {
+	const f = await fixture();
+	f.state.record.dictation = { language: "ru", engine: "whisper-large-v3-turbo" };
+	await f.mount();
+	const side: string[] = [];
+	await act(async () => { f.dictation.toggleFor({ id: "side:whisper", append: (text) => { side.push(text); } }); });
+	Worklet.all.at(-1)!.audio(new Int16Array(1600));
+	await act(async () => { await finishDictation(); });
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(f.state.posts.length, 0);
+	f.state.nextTranscription = Promise.resolve(Response.json({ text: "Отдельный вопрос." }));
+	await act(async () => { await f.dictation.finishFor("side:whisper"); });
+	assert.deepEqual(side, ["Отдельный вопрос."]);
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.state.posts.length, 1);
+});
+
 test("Whisper checks the key before capturing and cleanup failure still appends raw text", async () => {
 	const f = await fixture();
 	f.state.record.dictation = { language: "ru", engine: "whisper-large-v3" };
@@ -201,6 +221,57 @@ test("Whisper checks the key before capturing and cleanup failure still appends 
 	await act(async () => { await f.dictation.finish(); });
 	assert.deepEqual(f.state.appends, ["Исходный текст."]);
 	assert.match(f.dictation.error!, /Очистка пропущена/);
+});
+
+test("side recording has a fixed destination, and main finish never waits for or stops it", async () => {
+	const f = await fixture(); await f.mount();
+	const side: string[] = []; const other: string[] = [];
+	await act(async () => { f.dictation.toggleFor({ id: "side:first", append: (text) => { side.push(text); } }); });
+	const socket = Socket.all[0]!;
+	await act(async () => { socket.open(); socket.final("Side words"); });
+	assert.equal(f.dictation.destinationId, "side:first");
+	await act(async () => { await finishDictation(); await f.dictation.finishFor("side:another"); });
+	assert.equal(f.dictation.phase, "recording");
+	assert.deepEqual(side, []);
+	// A shortcut at another focused input stops the current run, not a second capture.
+	await act(async () => { f.dictation.toggleFor({ id: "side:another", append: (text) => { other.push(text); } }); });
+	assert.equal(f.dictation.phase, "stopping"); assert.equal(f.state.captures, 1);
+	await act(async () => { socket.final("final tail"); socket.end(); });
+	assert.deepEqual(side, ["Side words final tail"]); assert.deepEqual(other, []); assert.deepEqual(f.state.appends, []);
+});
+
+test("side finish waits for final speech and flushes once into its original saved draft", async () => {
+	const f = await fixture(); await f.mount(); const side: string[] = [];
+	await act(async () => { f.dictation.toggleFor({ id: "side:thread", append: (text) => { side.push(text); } }); });
+	const socket = Socket.all[0]!; await act(async () => { socket.open(); socket.final("Closing"); });
+	let finished = false; let done!: Promise<void>;
+	await act(async () => { done = f.dictation.finishFor("side:thread").then(() => { finished = true; }); });
+	assert.equal(finished, false); assert.deepEqual(side, []);
+	await act(async () => { socket.final("words"); socket.end(); await done; });
+	assert.equal(finished, true); assert.deepEqual(side, ["Closing words"]);
+	await act(async () => { await f.dictation.finishFor("side:thread"); });
+	assert.deepEqual(side, ["Closing words"]);
+});
+
+test("closing side recording during microphone setup cannot leave a late live capture", async () => {
+	const f = await fixture(); const mic = deferred<{ getTracks: () => { stop: () => void }[] }>();
+	f.state.nextMic = mic.promise; await f.mount();
+	await act(async () => { f.dictation.toggleFor({ id: "side:connecting", append: (text) => { f.state.appends.push(text); } }); });
+	assert.equal(f.dictation.phase, "connecting");
+	await act(async () => { await f.dictation.finishFor("side:connecting"); });
+	assert.equal(f.dictation.phase, "idle");
+	await act(async () => { mic.resolve({ getTracks: () => [{ stop() { f.state.stops++; } }] }); });
+	assert.equal(f.state.stops, 1); assert.equal(Socket.all.length, 0); assert.deepEqual(f.state.appends, []);
+});
+
+test("main recording retains its starting question field when later focus/claims change", async () => {
+	const f = await fixture(); const first: string[] = []; const later: string[] = [];
+	f.state.claimed = (text) => first.push(text); await f.mount();
+	await act(async () => { f.dictation.toggle(); }); const socket = Socket.all[0]!;
+	await act(async () => { socket.open(); socket.final("Main reasoning"); });
+	f.state.claimed = (text) => later.push(text); await f.mount();
+	await act(async () => { socket.end(); });
+	assert.deepEqual(first, ["Main reasoning"]); assert.deepEqual(later, []); assert.deepEqual(f.state.appends, []);
 });
 
 test("waits for the saved language; reconnect preserves it and finals still flush exactly once", async () => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useMemo, type ReactNode } from "react";
+import { Component, createContext, useMemo, type ReactNode, type RefObject } from "react";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import type { JobRecord, LhViewMessage, SubagentArtifactData, SubagentResultMeta } from "@/src/core";
 
 export interface DeliveredDemo {
@@ -46,7 +47,34 @@ export function demoFromJob(job: JobRecord | undefined): DeliveredDemo | undefin
 
 export const DemoDeliveryContext = createContext(indexDemoDelivery([], []));
 
-export function DemoDeliveryProvider({ messages, jobs, children }: { messages: LhViewMessage[]; jobs: JobRecord[]; children: ReactNode }) {
+type ReadingAnchorProps = { revision: string; scrollContextRef?: RefObject<StickToBottomContext | null>; children: ReactNode };
+type ReadingAnchor = { scroller: HTMLElement; element: Element; top: number } | null;
+
+/** Measure before React replaces a pending card, then retain the visible prose.
+ * Reading above the live bottom must not jump when a background demo finishes. */
+class DemoReadingAnchor extends Component<ReadingAnchorProps> {
+	getSnapshotBeforeUpdate(previous: ReadingAnchorProps): ReadingAnchor {
+		if (previous.revision === this.props.revision) return null;
+		const context = this.props.scrollContextRef?.current;
+		const scroller = context?.scrollRef.current;
+		if (!scroller || context?.isAtBottom) return null;
+		const bounds = scroller.getBoundingClientRect();
+		const element = Array.from(scroller.querySelectorAll('[data-source-message-id] :is(p,h1,h2,h3,h4,li,pre)'))
+			.find(node => { const box = node.getBoundingClientRect(); return box.bottom > bounds.top && box.top < bounds.bottom; });
+		return element ? { scroller, element, top: element.getBoundingClientRect().top } : null;
+	}
+	componentDidUpdate(_previous: ReadingAnchorProps, _state: unknown, anchor: ReadingAnchor) {
+		if (anchor?.element.isConnected) anchor.scroller.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
+	}
+	render() { return this.props.children; }
+}
+
+export function DemoDeliveryProvider({ messages, jobs, children, scrollContextRef }: {
+	messages: LhViewMessage[]; jobs: JobRecord[]; children: ReactNode; scrollContextRef?: RefObject<StickToBottomContext | null>;
+}) {
 	const value = useMemo(() => indexDemoDelivery(messages, jobs), [messages, jobs]);
-	return <DemoDeliveryContext.Provider value={value}>{children}</DemoDeliveryContext.Provider>;
+	const revision = [...value.artifacts.keys()].sort().join("\n");
+	return <DemoReadingAnchor revision={revision} scrollContextRef={scrollContextRef}>
+		<DemoDeliveryContext.Provider value={value}>{children}</DemoDeliveryContext.Provider>
+	</DemoReadingAnchor>;
 }
