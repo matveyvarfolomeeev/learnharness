@@ -81,6 +81,15 @@ export function chatGPTRequest<T>(op: "status" | "models" | "lease", fields: Rec
 }
 export function chatGPTStatus(): ChatGPTStatus { return bridge().status; }
 export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return runtimeConnected() && s.available && s.accounts.some((a) => a.id === s.activeId && a.connected && a.planEnabled === true); }
+/** Check the local OAuth owner before a manual catalog refresh, including on a cold start. */
+export async function readChatGPTConnection(): Promise<boolean> {
+ if (!runtimeConnected()) return false;
+ try {
+  const value = await chatGPTRequest<StatusValue>("status");
+  acceptStatus(bridge(), value);
+  return chatGPTConnected();
+ } catch { return false; }
+}
 export function chatGPTBackgroundAllowed(): boolean { const s = chatGPTStatus(); return chatGPTConnected() && s.allowBackgroundUse === true; }
 export function onChatGPTChange(listener: () => void): () => void { bridge().listeners.add(listener); return () => { bridge().listeners.delete(listener); }; }
 export function chatGPTModels(): Model<"openai-responses">[] { return bridge().models; }

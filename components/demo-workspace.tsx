@@ -114,7 +114,7 @@ export function DemoWorkspace({ children, chatId, scrollContextRef }: {
 	const [resizing, setResizing] = useState(false);
 	const buttonClass = "rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring";
 	return <DemoContext.Provider value={{ show, selected, setInverted }}>
-		<div ref={rootRef} className="relative flex h-dvh min-w-0" data-testid="demo-workspace" style={resizing ? { cursor: "col-resize", userSelect: "none" } : undefined}>
+		<div ref={rootRef} data-session-surface="" className="relative flex h-dvh min-w-0" data-testid="demo-workspace" style={resizing ? { cursor: "col-resize", userSelect: "none" } : undefined}>
 			{children}
 			{selected && <aside ref={paneRef} role={full ? "dialog" : "region"} aria-modal={open && full ? true : undefined} aria-label={selected.title}
 				data-testid="demo-viewer" data-view={full ? "fullscreen" : "side"} inert={!open}

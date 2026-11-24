@@ -87,7 +87,8 @@ const nextConfig: NextConfig = {
 			// loads its colocated WASM through Node, also in packaged Electron.
 			// Side questions (2026-11-02): the side model's base prompt is read
 			// from disk per ask — a directory no agent-composition read names.
-			"src/agent/prompts/side-chat/*.md",
+			"src/agent/system-prompt.md",
+			"src/agent/prompts/**/*.md",
 			"src/agent/image-processing/*.mjs",
 			"src/agent/image-processing/LICENSE",
 			"node_modules/@silvia-odwyer/photon-node/**/*",
@@ -98,7 +99,7 @@ const nextConfig: NextConfig = {
 			// Public native OAuth factories load these flows through variable imports.
 			// Electron main uses the same standalone SDK; the offline runtime gate
 			// evaluates their real toAuth paths without login or provider requests.
-			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code}.js",
+			"node_modules/@earendil-works/pi-ai/dist/auth/oauth/{load,github-copilot,xai,device-code,trusted-url}.js",
 			"node_modules/@earendil-works/pi-ai/dist/utils/sleep.js",
 			"node_modules/@earendil-works/pi-agent-core/dist/**/*.json",
 			// Next 16.3.2 native Turbopack applies unanchored excludes while

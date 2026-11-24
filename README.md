@@ -1,8 +1,8 @@
 # LearnHarness — форк с проектами и адаптивной практикой
 
-Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.6.1**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
+Публичный форк [amosblomqvist/learnharness](https://github.com/amosblomqvist/learnharness), основанный на **v0.7.0**. В `main` находятся наши доработки: проекты и подпроекты знаний, статусы освоения и адаптивная Practice, Groq Whisper, уведомления, уточнения по выделенному тексту и просмотр демок справа или на весь экран со шагами.
 
-**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/cb25c8e49b85eed9e78315584731cad73a0118a6...main)
+**[Отличия, запуск и обновление форка](docs/fork.md)** · [История наших изменений](https://github.com/matveyvarfolomeeev/learnharness/compare/0292b85bcce080cc685f85d174a8cb2cc553a0ad...main)
 
 Готовые установщики этого форка пока не опубликованы — его можно запустить из исходников. Ссылки на `learnharness.ai` и релизы автора ниже ведут к исходному приложению, без наших дополнений. Личные диалоги, граф, профиль и ключи в этот репозиторий не входят.
 
@@ -43,7 +43,7 @@ Instead of just giving you an explanation, it uses your answers and thinking to 
 
 **Bring your files.** In the desktop app, attach PDFs, photos, or any other file with the paperclip, or drag them in. The file stays where it is: the message carries its path, and the agent reads it from there.
 
-The agent can also research questions in the background, create visual explanations, show your own images in the lesson and mark them up with arrows and labels, and build interactive demonstrations.
+The agent can also research questions in the background, create visual explanations, show your own images in the lesson and mark them up with arrows and labels (including figures it crops straight out of your PDFs, such as lecture slides), and build interactive demonstrations.
 
 ## Knowledge that carries forward
 

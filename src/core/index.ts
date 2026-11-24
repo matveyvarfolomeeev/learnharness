@@ -22,6 +22,7 @@ export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
+export * from "./session-folders.ts";
 export * from "./source-label.ts";
 export * from "./render-settings.ts";
 

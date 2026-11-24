@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { validatePluginSchema } from "../core/plugin-validation.ts";
@@ -327,7 +326,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					// This absolute runtime path is deliberately NOT an import/require in
 					// Next's module graph. Ship scripts/plugin-loader.cjs alongside app.
 					const sidecar = path.join(process.cwd(), "scripts", "plugin-loader.cjs");
-					const nativeRequire = createRequire(sidecar);
+					const nativeRequire = process.getBuiltinModule("node:module").createRequire(sidecar);
 					const loader = nativeRequire(sidecar) as { load(filename: string): PluginBackendModule };
 					pkg.backend = loader.load(entry);
 					if (!pkg.backend || typeof pkg.backend.activate !== "function") throw new Error("Plugin backend must export activate(context)");

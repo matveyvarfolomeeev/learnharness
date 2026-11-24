@@ -18,6 +18,7 @@
  */
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import { chatGPTModelMetadata } from "./remote-model-catalog.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
@@ -27,7 +28,7 @@ import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionMo
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(chatGPTModelMetadata()) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
 	]);
 }

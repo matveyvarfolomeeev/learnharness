@@ -1,8 +1,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Repository root (this file is at <root>/config.ts). */
-export const ROOT = path.dirname(fileURLToPath(import.meta.url));
+/** server.js sets its working directory to the installed standalone payload.
+ * A bundler may replace import.meta.url with the source checkout's URL. */
+export const ROOT = process.env.__NEXT_PRIVATE_STANDALONE_CONFIG ? process.cwd() : path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * THE data-location seam (the Electron contract, 2026-09-17): LH_DATA_DIR
