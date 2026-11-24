@@ -236,9 +236,16 @@ test("logout wins an in-flight refresh and retains only account/client/host mapp
 });
 
 test("account catalog is scoped, visibility filtered, and cleared on disconnect", async () => {
-	const f = await loggedIn();
+	const f = await loggedIn({ provider: async (url) => url.endsWith("/models") ? Response.json({ models: [
+		{ slug: "gpt-5", display_name: "Scratch model", visibility: "list", context_window: 500_000, max_context_window: 872_000 },
+		{ slug: "invalid-window", display_name: "Fallback", visibility: "list", context_window: "500000" },
+		{ slug: "hidden", display_name: "Hidden", visibility: "hide", context_window: 500_000 },
+	] }) : undefined });
 	try {
-		assert.deepEqual((await f.service.models()).models, [{ id: "gpt-5", name: "Scratch model" }]);
+		assert.deepEqual((await f.service.models()).models, [
+			{ id: "gpt-5", name: "Scratch model", contextWindow: 500_000 },
+			{ id: "invalid-window", name: "Fallback" },
+		]);
 		await f.service.logout(f.saved.activeId);
 		assert.deepEqual((await f.service.models()).models, []);
 	} finally { f.service.close(); }

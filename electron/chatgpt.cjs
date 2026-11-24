@@ -423,7 +423,13 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			const visible = body.models
+				.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string")
+				.map((m) => {
+					const contextWindow = m.context_window;
+					const validWindow = Number.isSafeInteger(contextWindow) && contextWindow > 0 && contextWindow <= 100_000_000;
+					return { id: m.slug, name: m.display_name, ...(validWindow ? { contextWindow } : {}) };
+				});
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;

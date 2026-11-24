@@ -16,11 +16,12 @@ test("a subscription-only refresh intersects trusted Responses metadata with the
 	delete process.env.LH_DESKTOP_SERVER;
 	delete process.env.LH_DESKTOP_API_SECRET;
 	const { refreshModelCatalog } = await import("../src/server/remote-model-catalog.ts");
-	const { modelCatalog, refreshConnectionCatalog } = await import("../src/server/model-catalog.ts");
+	const { catalogContextLimits, modelCatalog, refreshConnectionCatalog } = await import("../src/server/model-catalog.ts");
+	const { effectiveThresholdTokens } = await import("../src/server/compaction.ts");
 	const { piEngineForSpec } = await import("../src/agent/models.ts");
 	const id = "account-refresh-example";
 	let connected = true;
-	let offered = [{ id, name: "Name from account" }, { id: "unknown-metadata", name: "Unknown" }];
+	let offered = [{ id, name: "Name from account", contextWindow: 500_000 }, { id: "unknown-metadata", name: "Unknown" }];
 	configureWebSubscriptionRuntime(async <T>(channel: string, op: string): Promise<T> => {
 		assert.equal(channel, "lh:chatgpt");
 		assert.ok(op === "status" || op === "models");
@@ -44,11 +45,12 @@ test("a subscription-only refresh intersects trusted Responses metadata with the
 	assert.equal(await refreshModelCatalog(), "updated");
 	assert.equal(publicFeed.mock.callCount(), 1);
 	const rows = modelCatalog().models.filter(model => model.provider === "chatgpt");
-	assert.deepEqual(rows.map(model => [model.id, model.name]), [[id, "Name from account"]]);
+	assert.deepEqual(rows.map(model => [model.id, model.name, model.contextWindow]), [[id, "Name from account", 500_000]]);
 	assert.equal(modelCatalog().models.some(model => model.provider === "openai"), false);
 	const engine = piEngineForSpec({ provider: "chatgpt", id, thinkingLevel: "xhigh" });
 	assert.equal(engine.level, "xhigh");
-	assert.equal(engine.model.contextWindow, 120000);
+	assert.equal(engine.model.contextWindow, 500_000);
+	assert.equal(effectiveThresholdTokens(450_000, catalogContextLimits().get(`chatgpt:${id}`)), 450_000);
 	assert.equal(engine.model.maxTokens, 8192);
 	assert.deepEqual(engine.model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 	assert.equal(await refreshModelCatalog(), "unchanged");
